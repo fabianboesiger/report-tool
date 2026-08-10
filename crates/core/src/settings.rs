@@ -127,6 +127,60 @@ impl Default for Provider {
     }
 }
 
+/// Which palette the window uses.
+///
+/// Lives here rather than in the app for the same reason [`OpenAiConfig`] does: it is
+/// plain serde data with no UI in it, and putting it in `Settings` gets it the atomic
+/// write and the never-fails-to-load guarantee for free rather than a second file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Theme {
+    /// Follow the operating system. The default, because it is the only setting that is
+    /// right without having been chosen.
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl Theme {
+    /// The `data-theme` value the stylesheet selects on.
+    ///
+    /// Named after the attribute so that grepping either one finds the other — the
+    /// stylesheet and this function have to agree, and nothing else would notice a
+    /// value the CSS has no rule for: the app would simply render light and no one
+    /// would know why. There is a test in the app that checks they agree.
+    pub fn attribute(self) -> &'static str {
+        match self {
+            Theme::System => "system",
+            Theme::Light => "light",
+            Theme::Dark => "dark",
+        }
+    }
+
+    /// What the rail's Appearance button does.
+    ///
+    /// One cycling button rather than three radios: appearance is not worth a settings
+    /// group, cycling means the label always states what you have, and pressing three
+    /// times returns you to where you started.
+    pub fn next(self) -> Theme {
+        match self {
+            Theme::System => Theme::Light,
+            Theme::Light => Theme::Dark,
+            Theme::Dark => Theme::System,
+        }
+    }
+
+    /// The button's label, which doubles as its current value.
+    pub fn label(self) -> &'static str {
+        match self {
+            Theme::System => "Appearance: system",
+            Theme::Light => "Appearance: light",
+            Theme::Dark => "Appearance: dark",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(default)]
@@ -137,6 +191,8 @@ pub struct Settings {
     pub local: LocalConfig,
     #[serde(default)]
     pub stt: SttConfig,
+    #[serde(default)]
+    pub appearance: Theme,
 }
 
 impl Settings {
@@ -313,9 +369,34 @@ mod tests {
             },
             local: LocalConfig { model_path: "/models/x.gguf".into(), context_tokens: 4096 },
             stt: SttConfig { model_path: "/models/ggml-base.bin".into(), language: "de".into() },
+            appearance: Theme::Dark,
         };
         let text = serde_json::to_string(&settings).unwrap();
         assert_eq!(serde_json::from_str::<Settings>(&text).unwrap(), settings);
+    }
+
+    #[test]
+    fn the_appearance_cycle_returns_to_where_it_started() {
+        // Three presses and you are back, which is what makes one button acceptable
+        // where three radios would otherwise be needed.
+        let mut theme = Theme::System;
+        for _ in 0..3 {
+            theme = theme.next();
+        }
+        assert_eq!(theme, Theme::System);
+        // Every state must be reachable, or the button silently has two positions.
+        assert_eq!(Theme::System.next(), Theme::Light);
+        assert_eq!(Theme::Light.next(), Theme::Dark);
+    }
+
+    #[test]
+    fn a_theme_serialises_as_the_attribute_the_stylesheet_expects() {
+        // `attribute` is what the CSS selects on and the serde name is what lands in
+        // settings.json; they are allowed to differ, so both are pinned here.
+        assert_eq!(Theme::System.attribute(), "system");
+        assert_eq!(Theme::Dark.attribute(), "dark");
+        assert_eq!(serde_json::to_string(&Theme::Dark).unwrap(), r#""dark""#);
+        assert_eq!(serde_json::from_str::<Theme>(r#""light""#).unwrap(), Theme::Light);
     }
 
     #[test]
@@ -331,6 +412,9 @@ mod tests {
         assert_eq!(settings.provider, Provider::Local);
         assert_eq!(settings.openai.api_key, "");
         assert!(settings.openai.timeout_secs > 0, "a missing timeout must not become zero");
+        // Written before `appearance` existed, so it must default rather than fail the
+        // whole file and reset the user's provider and key along with it.
+        assert_eq!(settings.appearance, Theme::System);
     }
 
     // Only meaningful where the connector exists; without it the backend refuses

@@ -27,6 +27,8 @@ use report_core::template::{NodeId, NodeKind, Template, TemplateNode};
 use report_doc::{BlockId, Span};
 use report_editor::{use_bridge, EditableText, Focus, RawEvent};
 
+use crate::ui::kit::{Button, Icon, IconButton, NumberField, Variant};
+
 /// A template node's identity as the editor addresses it.
 fn block_id(id: NodeId) -> BlockId {
     BlockId(id.0)
@@ -60,20 +62,20 @@ pub fn TemplateBuilder(template: Signal<Template>) -> Element {
     let nodes = template.read().nodes.clone();
 
     rsx! {
-        div { class: "tb",
-            div { class: "tb-meta",
-                input {
-                    class: "tb-name",
-                    value: "{name}",
-                    placeholder: "Template name",
-                    oninput: move |event| template.write().name = event.value(),
-                }
-                input {
-                    class: "tb-purpose",
-                    value: "{purpose}",
-                    placeholder: "What is this kind of report for?",
-                    oninput: move |event| template.write().description = event.value(),
-                }
+        div { class: "tpl",
+            input {
+                class: "tpl-name",
+                value: "{name}",
+                placeholder: "Template name",
+                "aria-label": "Template name",
+                oninput: move |event| template.write().name = event.value(),
+            }
+            input {
+                class: "tpl-purpose",
+                value: "{purpose}",
+                placeholder: "What is this kind of report for?",
+                "aria-label": "What this kind of report is for",
+                oninput: move |event| template.write().description = event.value(),
             }
 
             NodeList { template, focus, parent: None, nodes, depth: 0 }
@@ -90,7 +92,7 @@ fn NodeList(
     depth: u8,
 ) -> Element {
     rsx! {
-        div { class: "tb-list",
+        div { class: "tpl-list",
             for node in nodes.iter() {
                 NodeCard { key: "{node.id}", template, focus, node: node.clone(), depth }
             }
@@ -119,53 +121,54 @@ fn NodeCard(
     let child_depth = if matches!(node.kind, NodeKind::Section { .. }) { depth + 1 } else { depth };
 
     rsx! {
-        div { class: "tb-node tb-{node.kind.tag()}",
-            div { class: "tb-head",
-                span { class: "tb-chip tb-chip-{node.kind.tag()}", "{chip(&node.kind)}" }
+        div { class: "node node-{node.kind.tag()}",
+            div { class: "node-head",
+                span { class: "kind", "{kind_label(&node.kind)}" }
                 input {
-                    class: "tb-label",
+                    class: "lbl",
                     value: "{node.label}",
                     placeholder: "Field name",
+                    "aria-label": "Field name",
                     oninput: move |event| {
                         template.write().set_label(id, event.value());
                     },
                 }
-                // The JSON key, shown because it is what a generated report is
-                // stored against and it deliberately does not follow a rename.
-                span { class: "tb-key", title: "JSON key (fixed once created)", "{node.key}" }
-                span { class: "tb-spacer" }
-                button {
-                    class: "tb-btn", title: "Move up",
-                    onclick: move |_| { template.write().move_by(id, -1); },
-                    "↑"
-                }
-                button {
-                    class: "tb-btn", title: "Move down",
-                    onclick: move |_| { template.write().move_by(id, 1); },
-                    "↓"
-                }
-                button {
-                    class: "tb-btn tb-danger", title: "Delete this field and everything in it",
-                    onclick: move |_| { template.write().remove(id); },
-                    "✕"
+                span { class: "acts",
+                    IconButton {
+                        icon: Icon::ChevronUp,
+                        title: "Move up".to_string(),
+                        onclick: move |_| { template.write().move_by(id, -1); },
+                    }
+                    IconButton {
+                        icon: Icon::ChevronDown,
+                        title: "Move down".to_string(),
+                        onclick: move |_| { template.write().move_by(id, 1); },
+                    }
+                    IconButton {
+                        icon: Icon::Close,
+                        title: "Delete this field and everything in it".to_string(),
+                        onclick: move |_| { template.write().remove(id); },
+                    }
                 }
             }
 
             EditableText {
                 id: block,
                 html,
-                class: "tb-desc {description_class(&node.kind, depth)}",
+                class: "node-desc {description_class(&node.kind, depth)}",
                 placeholder: placeholder(&node.kind),
             }
 
             Options { template, node: node.clone() }
 
             if is_container {
-                NodeList {
-                    template, focus,
-                    parent: Some(id),
-                    nodes: node.kind.children().unwrap_or_default().to_vec(),
-                    depth: child_depth,
+                div { class: "kids",
+                    NodeList {
+                        template, focus,
+                        parent: Some(id),
+                        nodes: node.kind.children().unwrap_or_default().to_vec(),
+                        depth: child_depth,
+                    }
                 }
             }
         }
@@ -180,7 +183,7 @@ fn Options(template: Signal<Template>, node: TemplateNode) -> Element {
         NodeKind::List { ordered, min_items, max_items, .. } => {
             let (ordered, min_items, max_items) = (*ordered, *min_items, *max_items);
             rsx! {
-                div { class: "tb-opts",
+                div { class: "node-opts",
                     label {
                         input {
                             r#type: "checkbox",
@@ -193,14 +196,16 @@ fn Options(template: Signal<Template>, node: TemplateNode) -> Element {
                                 }
                             },
                         }
-                        " numbered"
+                        // "numbered", not "ordered": one is what the user sees on the page,
+                        // the other is what the JSON field happens to be called.
+                        "numbered"
                     }
-                    Bound {
-                        label: "min".to_string(), value: min_items,
+                    NumberField {
+                        label: "at least".to_string(), value: min_items,
                         on_change: move |v| set_list_bounds(template, id, Some(v), None),
                     }
-                    Bound {
-                        label: "max".to_string(), value: max_items,
+                    NumberField {
+                        label: "at most".to_string(), value: max_items,
                         on_change: move |v| set_list_bounds(template, id, None, Some(v)),
                     }
                 }
@@ -209,52 +214,34 @@ fn Options(template: Signal<Template>, node: TemplateNode) -> Element {
         NodeKind::Repeat { item_label, min, max, .. } => {
             let (item_label, min, max) = (item_label.clone(), *min, *max);
             rsx! {
-                div { class: "tb-opts",
-                    input {
-                        class: "tb-item-label",
-                        value: "{item_label}",
-                        placeholder: "one entry per… (e.g. defect)",
-                        oninput: move |event| {
-                            if let Some(found) = template.write().find_mut(id) {
-                                if let NodeKind::Repeat { item_label, .. } = &mut found.kind {
-                                    *item_label = event.value();
+                div { class: "node-opts",
+                    label {
+                        "one per "
+                        input {
+                            r#type: "text",
+                            value: "{item_label}",
+                            placeholder: "defect",
+                            oninput: move |event| {
+                                if let Some(found) = template.write().find_mut(id) {
+                                    if let NodeKind::Repeat { item_label, .. } = &mut found.kind {
+                                        *item_label = event.value();
+                                    }
                                 }
-                            }
-                        },
+                            },
+                        }
                     }
-                    Bound {
-                        label: "min".to_string(), value: min,
+                    NumberField {
+                        label: "at least".to_string(), value: min,
                         on_change: move |v| set_repeat_bounds(template, id, Some(v), None),
                     }
-                    Bound {
-                        label: "max".to_string(), value: max,
+                    NumberField {
+                        label: "at most".to_string(), value: max,
                         on_change: move |v| set_repeat_bounds(template, id, None, Some(v)),
                     }
                 }
             }
         }
         _ => rsx! {},
-    }
-}
-
-/// An optional count. Empty means unbounded, which is the common case and so is the
-/// default; a `0` would mean something quite different.
-#[component]
-fn Bound(label: String, value: Option<u32>, on_change: EventHandler<Option<u32>>) -> Element {
-    let shown = value.map(|v| v.to_string()).unwrap_or_default();
-    rsx! {
-        label { class: "tb-bound",
-            "{label} "
-            input {
-                r#type: "number",
-                min: "0",
-                value: "{shown}",
-                oninput: move |event| {
-                    let text = event.value();
-                    on_change.call(if text.trim().is_empty() { None } else { text.trim().parse().ok() });
-                },
-            }
-        }
     }
 }
 
@@ -302,12 +289,13 @@ fn AddRow(template: Signal<Template>, parent: Option<NodeId>) -> Element {
         }
     };
     rsx! {
-        div { class: "tb-add",
-            button { class: "tb-add-btn", onclick: add("paragraph"), "+ Paragraph" }
-            button { class: "tb-add-btn", onclick: add("list"), "+ List" }
-            button { class: "tb-add-btn", onclick: add("section"), "+ Section" }
-            button { class: "tb-add-btn", onclick: add("optional"), "+ Optional" }
-            button { class: "tb-add-btn", onclick: add("repeat"), "+ Repeat" }
+        div { class: "add",
+            // Labelled as what they do to the report, not as what they are in the tree.
+            Button { label: "+ Paragraph".to_string(), variant: Variant::Ghost, onclick: add("paragraph") }
+            Button { label: "+ List".to_string(), variant: Variant::Ghost, onclick: add("list") }
+            Button { label: "+ Section".to_string(), variant: Variant::Ghost, onclick: add("section") }
+            Button { label: "+ Only sometimes".to_string(), variant: Variant::Ghost, onclick: add("optional") }
+            Button { label: "+ Repeats".to_string(), variant: Variant::Ghost, onclick: add("repeat") }
         }
     }
 }
@@ -345,13 +333,19 @@ fn blank(kind: &str) -> TemplateNode {
     }
 }
 
-fn chip(kind: &NodeKind) -> &'static str {
+/// What a node is, said in the words of the report rather than of the tree.
+///
+/// "Optional" and "Repeat" are the names of the node kinds; "Sometimes" and "Repeats" are
+/// what they do to the document. Nobody arranging a report thinks in node kinds, and the
+/// glyph prefixes the chips used to carry (`¶`, `§`, `↺`) were decoration on a word that
+/// already said it.
+fn kind_label(kind: &NodeKind) -> &'static str {
     match kind {
-        NodeKind::Paragraph { .. } => "¶ Paragraph",
-        NodeKind::List { .. } => "• List",
-        NodeKind::Section { .. } => "§ Section",
-        NodeKind::Optional { .. } => "? Optional",
-        NodeKind::Repeat { .. } => "↺ Repeat",
+        NodeKind::Paragraph { .. } => "Paragraph",
+        NodeKind::List { .. } => "List",
+        NodeKind::Section { .. } => "Section",
+        NodeKind::Optional { .. } => "Sometimes",
+        NodeKind::Repeat { .. } => "Repeats",
     }
 }
 
@@ -361,11 +355,11 @@ fn description_class(kind: &NodeKind, depth: u8) -> String {
     match kind {
         NodeKind::Section { .. } => {
             let level = (depth + 1).min(report_doc::BlockKind::MAX_HEADING_LEVEL);
-            format!("tb-as-h{level}")
+            format!("as-h{level}")
         }
-        NodeKind::Paragraph { .. } => "tb-as-p".into(),
-        NodeKind::List { .. } => "tb-as-list".into(),
-        _ => "tb-as-note".into(),
+        NodeKind::Paragraph { .. } => "as-p".into(),
+        NodeKind::List { .. } => "as-list".into(),
+        _ => "as-note".into(),
     }
 }
 
@@ -378,6 +372,66 @@ fn placeholder(kind: &NodeKind) -> String {
         NodeKind::Repeat { .. } => "What is repeated, and once per what?",
     }
     .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn node_kinds_are_named_after_what_they_do_to_the_report() {
+        // The jargon this redesign set out to remove. If "Optional" or "Repeat" come back
+        // it is because someone reached for the enum variant's name again.
+        assert_eq!(
+            kind_label(&NodeKind::Optional { description: String::new(), children: vec![] }),
+            "Sometimes"
+        );
+        assert_eq!(
+            kind_label(&NodeKind::Repeat {
+                description: String::new(),
+                item_label: String::new(),
+                min: None,
+                max: None,
+                children: vec![],
+            }),
+            "Repeats"
+        );
+        for kind in [
+            NodeKind::Paragraph { description: String::new() },
+            NodeKind::Section { heading_description: String::new(), children: vec![] },
+        ] {
+            let label = kind_label(&kind);
+            assert!(
+                !label.contains('¶') && !label.contains('§') && !label.contains('↺'),
+                "the glyph prefixes were decoration on a word that already said it: {label}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sections_instruction_is_set_in_the_heading_it_will_produce() {
+        // The whole point of the outline: an instruction reads as the thing it becomes.
+        assert_eq!(
+            description_class(
+                &NodeKind::Section { heading_description: String::new(), children: vec![] },
+                0
+            ),
+            "as-h1"
+        );
+        assert_eq!(
+            description_class(
+                &NodeKind::Section { heading_description: String::new(), children: vec![] },
+                2
+            ),
+            "as-h3"
+        );
+        // Never past the deepest heading the document model has.
+        let deep = description_class(
+            &NodeKind::Section { heading_description: String::new(), children: vec![] },
+            250,
+        );
+        assert_eq!(deep, format!("as-h{}", report_doc::BlockKind::MAX_HEADING_LEVEL));
+    }
 }
 
 fn handle(event: RawEvent, mut template: Signal<Template>, mut focus: Signal<Focus>) {

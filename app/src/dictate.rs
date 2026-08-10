@@ -45,6 +45,21 @@ pub struct DictationControl {
     settings: Signal<Settings>,
 }
 
+/// Two controls are the same control when they drive the same recorder and the same
+/// document. Hand-written because [`Recorder`] owns an audio stream and has no business
+/// being comparable — what matters here is identity, which `Rc::ptr_eq` answers exactly.
+///
+/// Needed because `#[component]` derives `PartialEq` on its props to decide whether a
+/// re-render can be skipped.
+impl PartialEq for DictationControl {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.recorder, &other.recorder)
+            && self.state == other.state
+            && self.notes == other.notes
+            && self.settings == other.settings
+    }
+}
+
 pub fn use_dictation(notes: Signal<RichDoc>, settings: Signal<Settings>) -> DictationControl {
     let recorder = use_hook(|| Rc::new(RefCell::new(None::<Recorder>)));
     let state = use_signal(|| Dictation::Idle);

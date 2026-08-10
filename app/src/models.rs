@@ -10,6 +10,8 @@
 use dioxus::prelude::*;
 use report_core::catalog::{self, ModelSpec};
 
+use crate::ui::kit::{Banner, Bar};
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stage {
     /// Queued behind another download.
@@ -196,29 +198,20 @@ pub fn ModelBanner(statuses: Signal<Vec<ModelStatus>>) -> Element {
     }
 
     rsx! {
-        div { class: "dl",
-            for status in showing.iter() {
-                div { key: "{status.name}", class: "dl-row",
-                    span { class: "dl-name", "{status.name}" }
-                    div { class: "dl-track",
-                        div {
-                            class: match status.stage {
-                                Stage::Failed(_) => "dl-fill is-failed",
-                                _ => "dl-fill",
-                            },
-                            // An unknown total still shows movement rather than an
-                            // empty bar that looks stuck.
-                            style: match status.fraction() {
-                                Some(fraction) => format!("width: {:.1}%", fraction * 100.0),
-                                None => "width: 100%; opacity: 0.25".to_string(),
-                            },
-                        }
-                    }
-                    span { class: "dl-detail", "{status.detail()}" }
+        for status in showing.iter() {
+            Banner {
+                key: "{status.name}",
+                warn: matches!(status.stage, Stage::Failed(_)),
+                span { "Preparing {status.name} — {status.detail()}" }
+                // An unknown total still shows movement rather than an empty bar that
+                // looks stuck.
+                Bar { fraction: status.fraction() }
+                span { class: "banner-tail",
+                    // Which is the point of fetching the small one first: dictation lands
+                    // in about a minute, so notes can be taken while the report model is
+                    // still arriving.
+                    "You can keep taking notes"
                 }
-            }
-            p { class: "dl-note",
-                "Downloading in the background. It continues where it left off if you quit."
             }
         }
     }

@@ -10,15 +10,42 @@
  * has to agree with what the markdown exporter writes.
  */
 
+/* --- palette --------------------------------------------------------------
+ *
+ * The editor takes its colours from whatever is above it, and falls back to its own
+ * when there is nothing there. `var(--text, …)` resolves against the custom
+ * properties inherited at `.rt-editor`, so a host that defines `--text` drives this
+ * editor and a host that defines nothing gets the values below. That is the whole
+ * contract: six property names, and no Rust. This crate still knows nothing about the
+ * application above it, because a custom property is a string in a stylesheet, not a
+ * type.
+ *
+ * The indirection through `--rt-*-default` is what makes the dark block below safe.
+ * A single-level `var(--text, #1a1a1a)` has a literal for its fallback, so moving it
+ * for dark mode would mean overriding `--rt-fg` itself — which would also fire for a
+ * host that is deliberately in light mode on a dark-mode machine. Overriding only the
+ * defaults leaves a host token winning either way.
+ */
+
 .rt-editor {
-  --rt-fg: #1a1a1a;
-  --rt-muted: #8a8a8a;
-  --rt-rule: #e2e2e2;
-  --rt-accent: #2f6feb;
-  --rt-code-bg: #f4f4f5;
+  --rt-fg-default: #1a1a1a;
+  --rt-muted-default: #8a8a8a;
+  --rt-rule-default: #e2e2e2;
+  --rt-accent-default: #2f6feb;
+  --rt-on-accent-default: #ffffff;
+  --rt-code-bg-default: #f4f4f5;
+
+  --rt-fg: var(--text, var(--rt-fg-default));
+  --rt-muted: var(--muted, var(--rt-muted-default));
+  --rt-rule: var(--line, var(--rt-rule-default));
+  --rt-accent: var(--accent, var(--rt-accent-default));
+  --rt-on-accent: var(--on-accent, var(--rt-on-accent-default));
+  --rt-code-bg: var(--sunk, var(--rt-code-bg-default));
 
   color: var(--rt-fg);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  /* The host owns type. This was a hardcoded system stack, which meant an app in a
+     serif could not put its report in one. */
+  font-family: inherit;
   font-size: 15px;
   line-height: 1.6;
   display: flex;
@@ -26,13 +53,16 @@
   min-height: 0;
 }
 
+/* Standalone consumers only. A host that switches theme by attribute overrides every
+   `--rt-*` above through its own tokens, so this never reaches it. */
 @media (prefers-color-scheme: dark) {
   .rt-editor {
-    --rt-fg: #e8e8e8;
-    --rt-muted: #7c7c7c;
-    --rt-rule: #333;
-    --rt-accent: #6c9dff;
-    --rt-code-bg: #202024;
+    --rt-fg-default: #e8e8e8;
+    --rt-muted-default: #7c7c7c;
+    --rt-rule-default: #333;
+    --rt-accent-default: #6c9dff;
+    --rt-on-accent-default: #0a0a0a;
+    --rt-code-bg-default: #202024;
   }
 }
 
@@ -187,7 +217,9 @@
 
 .rt-tool.rt-active {
   background: var(--rt-accent);
-  color: #fff;
+  /* Not `#fff`. A host whose accent is ink — near-white in dark mode — would otherwise
+     paint white on white and the active button would vanish. */
+  color: var(--rt-on-accent);
 }
 
 .rt-bold { font-weight: 700; }

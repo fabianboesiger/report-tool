@@ -58,11 +58,29 @@ impl Report {
 }
 
 /// Enough to list something without loading it.
+///
+/// Deliberately more than an id and a name. The library screen shows which template a
+/// report came from and whether it has been written yet, and finding that out any other
+/// way would mean deserialising every report's notes and prose in order to draw one
+/// list. [`list`] already parses each file into a `Value`; these are two more field
+/// reads out of a value that is in hand.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Summary {
     pub id: Uuid,
     pub name: String,
+    /// Seconds since the epoch. A report's own stamp; a template's file mtime.
     pub updated: u64,
+    /// The name of the template *snapshot* the report holds.
+    ///
+    /// Read from the snapshot rather than by following an id, because the snapshot is
+    /// what the report was actually written against — the template it came from may
+    /// since have been renamed or deleted, and the list must not go blank when it is.
+    ///
+    /// Empty for a template, which is its own source.
+    pub template_name: String,
+    /// Whether the report has been generated at least once, shown as Draft or Final.
+    /// Always false for a template.
+    pub generated: bool,
 }
 
 pub fn save_template(template: &Template) -> Result<()> {
@@ -78,14 +96,21 @@ pub fn delete_template(id: Uuid) -> Result<()> {
 }
 
 pub fn list_templates() -> Result<Vec<Summary>> {
-    list(&crate::paths::templates_dir()?, |value| {
+    let mut templates = list(&crate::paths::templates_dir()?, |value, modified| {
         Some(Summary {
             id: value.get("id")?.as_str()?.parse().ok()?,
             name: value.get("name")?.as_str()?.to_string(),
-            // Templates carry no timestamp; the file's own mtime orders them.
-            updated: 0,
+            // Templates carry no timestamp of their own, so the file's mtime orders
+            // them. It used to be hardcoded to zero under a comment saying this, which
+            // left the list in whatever order the directory happened to yield.
+            updated: modified,
+            // A template is its own source, and has nothing to be a draft of.
+            template_name: String::new(),
+            generated: false,
         })
-    })
+    })?;
+    templates.sort_by(|a, b| b.updated.cmp(&a.updated).then_with(|| a.name.cmp(&b.name)));
+    Ok(templates)
 }
 
 pub fn save_report(report: &Report) -> Result<()> {
@@ -103,11 +128,22 @@ pub fn delete_report(id: Uuid) -> Result<()> {
 }
 
 pub fn list_reports() -> Result<Vec<Summary>> {
-    let mut reports = list(&crate::paths::reports_dir()?, |value| {
+    let mut reports = list(&crate::paths::reports_dir()?, |value, _modified| {
         Some(Summary {
             id: value.get("id")?.as_str()?.parse().ok()?,
             name: value.get("name")?.as_str()?.to_string(),
+            // The report's own stamp, not the file's: `save_report` sets it, and it is
+            // what the sort below and the row's relative time both mean by "updated".
             updated: value.get("updated").and_then(serde_json::Value::as_u64).unwrap_or(0),
+            template_name: value
+                .get("template")
+                .and_then(|template| template.get("name"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            // `null` until the report has been written once, which is exactly the
+            // Draft/Final distinction the library row draws.
+            generated: value.get("generated").is_some_and(|value| !value.is_null()),
         })
     })?;
     // Most recently worked on first: the one a user wants next is almost always the
@@ -122,6 +158,80 @@ pub fn now() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// A timestamp as a person would say it: "2 hours ago", "Yesterday", "4 Aug".
+///
+/// Here rather than in the app for the same reason [`crate::download::human_bytes`] is:
+/// it formats a value this module produces, and a pure function is worth more in the
+/// fast test job than beside the component that happens to draw it.
+///
+/// Switches from elapsed time to a date at two days, which is where "47 hours ago" stops
+/// being easier to read than the date itself.
+pub fn relative_time(when: u64) -> String {
+    relative_to(when, now())
+}
+
+/// The same, against an explicit clock.
+///
+/// Split out purely so it can be tested: a function that reads the wall clock can be
+/// checked for shape and never for a value, and every interesting case here is about
+/// exactly where a boundary falls.
+pub fn relative_to(when: u64, now: u64) -> String {
+    const MINUTE: u64 = 60;
+    const HOUR: u64 = 60 * MINUTE;
+    const DAY: u64 = 24 * HOUR;
+
+    // Saturating: a report copied from a machine whose clock runs ahead would otherwise
+    // wrap and the row would read "584942417355 years ago".
+    match now.saturating_sub(when) {
+        elapsed if elapsed < MINUTE => "Just now".to_string(),
+        elapsed if elapsed < HOUR => plural(elapsed / MINUTE, "minute"),
+        elapsed if elapsed < DAY => plural(elapsed / HOUR, "hour"),
+        elapsed if elapsed < 2 * DAY => "Yesterday".to_string(),
+        _ => short_date(when),
+    }
+}
+
+fn plural(count: u64, unit: &str) -> String {
+    if count == 1 {
+        format!("1 {unit} ago")
+    } else {
+        format!("{count} {unit}s ago")
+    }
+}
+
+/// "4 Aug", from a unix timestamp, without a date crate.
+///
+/// Hinnant's `civil_from_days`: shifting the epoch to 1 March puts a leap day at the end
+/// of the year, after which every month has a closed-form length. A dozen lines, exact
+/// for every date this app will ever hold, and no dependency.
+///
+/// **UTC, not local time.** A report saved at 23:30 in Zurich therefore shows the
+/// following day's date once it is more than two days old. Fixing that needs a timezone
+/// database — the `time` crate, or `libc::localtime_r` — and this is a six-character
+/// label on a row that also carries a name; it is not worth a dependency, and it is
+/// worth saying out loud rather than leaving as a puzzle.
+fn short_date(when: u64) -> String {
+    const MONTHS: [&str; 12] =
+        ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+    let days = (when / 86_400) as i64;
+    // Shift the era to start on 1 March 0000, so February — and its leap day — is the
+    // last month of the year rather than the second.
+    let shifted = days + 719_468;
+    let era = if shifted >= 0 { shifted } else { shifted - 146_096 } / 146_097;
+    let day_of_era = shifted - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let shifted_month = (5 * day_of_year + 2) / 153;
+    let day = (day_of_year - (153 * shifted_month + 2) / 5 + 1) as usize;
+    // Undo the March shift: months 0..=9 are March..December, 10 and 11 are January and
+    // February of the following year.
+    let month = if shifted_month < 10 { shifted_month + 3 } else { shifted_month - 9 } as usize;
+
+    format!("{day} {}", MONTHS[month - 1])
 }
 
 // ---------------------------------------------------------------------------
@@ -156,9 +266,13 @@ fn remove(path: &Path) -> Result<()> {
 ///
 /// A file that will not parse is logged and skipped rather than failing the listing:
 /// one corrupt report must not make the library unopenable.
+///
+/// The summariser is handed the file's modification time alongside its contents, because
+/// a template carries no timestamp of its own and the mtime is the only thing that can
+/// order one.
 fn list(
     dir: &Path,
-    summarise: impl Fn(&serde_json::Value) -> Option<Summary>,
+    summarise: impl Fn(&serde_json::Value, u64) -> Option<Summary>,
 ) -> Result<Vec<Summary>> {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
@@ -172,11 +286,21 @@ fn list(
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
+        // A filesystem that cannot report a modification time yields zero, which sorts
+        // last rather than failing the listing over a cosmetic column.
+        let modified = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|since| since.as_secs())
+            .unwrap_or(0);
+
         match std::fs::read_to_string(&path)
             .ok()
             .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
             .as_ref()
-            .and_then(&summarise)
+            .and_then(|value| summarise(value, modified))
         {
             Some(summary) => out.push(summary),
             None => tracing::warn!("store: skipping unreadable {}", path.display()),
@@ -265,9 +389,23 @@ mod tests {
         assert_eq!(loaded.notes, report.notes);
         assert!(loaded.updated > 0, "saving must stamp the time");
 
+        // The library row's two columns, read out of the file rather than by loading it.
+        let listed = list_reports().unwrap();
+        assert_eq!(listed[0].template_name, "Site Inspection");
+        assert!(!listed[0].generated, "a report with no prose yet is a draft");
+
+        // A template's summary has a real mtime now, not the zero it used to carry.
+        assert!(list_templates().unwrap()[0].updated > 0, "the file's mtime must order it");
+
         // Saving again must overwrite rather than leave two entries.
         save_report(&loaded).unwrap();
         assert_eq!(list_reports().unwrap().len(), 1);
+
+        // Once written, the row must flip from Draft to Final.
+        let mut written = loaded.clone();
+        written.generated = Some(report_doc::markdown::from_markdown("# Findings\n\nAll noted."));
+        save_report(&written).unwrap();
+        assert!(list_reports().unwrap()[0].generated);
 
         // One unreadable file must not make the whole library unopenable.
         std::fs::write(crate::paths::reports_dir().unwrap().join("broken.json"), "{ not json")
@@ -290,15 +428,56 @@ mod tests {
 
     #[test]
     fn reports_are_listed_most_recently_worked_on_first() {
-        let mut summaries = vec![
-            Summary { id: Uuid::new_v4(), name: "old".into(), updated: 100 },
-            Summary { id: Uuid::new_v4(), name: "newest".into(), updated: 300 },
-            Summary { id: Uuid::new_v4(), name: "middle".into(), updated: 200 },
-        ];
+        let summary = |name: &str, updated| Summary {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            updated,
+            template_name: String::new(),
+            generated: false,
+        };
+        let mut summaries = [summary("old", 100), summary("newest", 300), summary("middle", 200)];
         summaries.sort_by(|a, b| b.updated.cmp(&a.updated).then_with(|| a.name.cmp(&b.name)));
         assert_eq!(
             summaries.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
             ["newest", "middle", "old"]
         );
+    }
+
+    #[test]
+    fn a_timestamp_reads_the_way_a_person_would_say_it() {
+        const HOUR: u64 = 3600;
+        const DAY: u64 = 24 * HOUR;
+        // A fixed clock, so this cannot start failing next Tuesday.
+        let now = 1_754_308_800; // 2025-08-04 12:00 UTC
+
+        assert_eq!(relative_to(now, now), "Just now");
+        assert_eq!(relative_to(now - 90, now), "1 minute ago");
+        assert_eq!(relative_to(now - 45 * 60, now), "45 minutes ago");
+        assert_eq!(relative_to(now - 2 * HOUR, now), "2 hours ago");
+        // "1 hours ago" is the sort of thing nobody notices until a screenshot.
+        assert_eq!(relative_to(now - HOUR - 1, now), "1 hour ago");
+        // The boundary: still yesterday at 30 hours, a date by 50.
+        assert_eq!(relative_to(now - 30 * HOUR, now), "Yesterday");
+        assert_eq!(relative_to(now - 50 * HOUR, now), "2 Aug");
+        assert_eq!(relative_to(now - 14 * DAY, now), "21 Jul");
+    }
+
+    #[test]
+    fn a_clock_that_runs_ahead_does_not_underflow() {
+        // A report copied from a machine ahead of this one. Unsaturated, `now - when`
+        // wraps and the row reads "584942417355 years ago".
+        let now = 1_754_308_800;
+        assert_eq!(relative_to(now + 3600, now), "Just now");
+    }
+
+    #[test]
+    fn the_short_date_survives_a_leap_day_and_the_epoch() {
+        // The whole reason for the March-shifted era: 2024 is a leap year, and 29
+        // February is the day a naive month-length table gets wrong.
+        assert_eq!(short_date(1_709_164_800), "29 Feb"); // 2024-02-29 00:00 UTC
+        assert_eq!(short_date(1_709_251_200), "1 Mar"); // the day after
+        assert_eq!(short_date(0), "1 Jan"); // 1970-01-01
+        assert_eq!(short_date(951_782_400), "29 Feb"); // 2000, a century leap year
+        assert_eq!(short_date(1_078_012_800), "29 Feb"); // 2004
     }
 }
