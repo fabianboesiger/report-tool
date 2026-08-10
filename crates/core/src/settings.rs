@@ -2,10 +2,11 @@
 //!
 //! ## The API key is stored in plain text
 //!
-//! `settings.json` sits in the app's data directory with the user's key in it,
-//! readable by anything running as that user. A platform keychain would be better and
-//! is a larger piece of work — the honest position for now is that this is stated
-//! rather than hidden, and that the local backend needs no key at all.
+//! It is a column in `report-tool.db` in the app's data directory, readable by anything
+//! running as that user. Moving to `sqlite` changed *where* it lives and nothing about
+//! how exposed it is — a platform keychain would be better and is a larger piece of
+//! work. The honest position is that this is stated rather than hidden, and that the
+//! local backend needs no key at all.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -196,42 +197,47 @@ pub struct Settings {
 }
 
 impl Settings {
-    /// Load from disk, falling back to defaults.
+    /// Load the settings, falling back to defaults.
     ///
-    /// Never fails. A settings file written by a future version, or corrupted by a
-    /// half-finished write, must not stop the app from starting — the user can always
-    /// re-enter a base URL, but cannot fix a program that refuses to open.
+    /// Never fails, and that is deliberate. A database written by a future version, a
+    /// row that will not deserialise, a data directory that cannot be created — none of
+    /// those should stop the app from starting. A user can always re-enter a base URL;
+    /// they cannot fix a program that refuses to open.
     pub fn load() -> Settings {
-        let Ok(path) = crate::paths::settings_path() else {
-            return Settings::default();
-        };
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            return Settings::default();
-        };
-        match serde_json::from_str(&text) {
-            Ok(settings) => settings,
+        match Self::try_load() {
+            Ok(Some(settings)) => settings,
+            // No row yet: a fresh install, which is not worth a warning.
+            Ok(None) => Settings::default(),
             Err(error) => {
-                tracing::warn!(
-                    "settings: {} is unreadable ({error}), using defaults",
-                    path.display()
-                );
+                tracing::warn!("settings: unreadable ({error:#}), using defaults");
                 Settings::default()
             }
         }
     }
 
+    fn try_load() -> Result<Option<Settings>> {
+        use rusqlite::OptionalExtension;
+
+        let connection = crate::db::open()?;
+        let body: Option<String> = connection
+            .query_row("SELECT body FROM settings WHERE id = 1", [], |row| row.get(0))
+            .optional()
+            .context("reading the settings row")?;
+
+        match body {
+            // Deserialised leniently, as before: every field carries `#[serde(default)]`,
+            // so a blob written before a field existed still opens.
+            Some(body) => Ok(Some(serde_json::from_str(&body).context("parsing the settings")?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Write the settings.
+    ///
+    /// A single upsert of one row, which is atomic — the temporary-file-and-rename dance
+    /// this used to need is now the database's problem rather than ours.
     pub fn save(&self) -> Result<()> {
-        let path = crate::paths::settings_path()?;
-        let text = serde_json::to_string_pretty(self).context("serialising settings")?;
-        // Written through a temporary file: a crash midway through a direct write
-        // would leave a truncated file, and the next start would silently discard
-        // every setting including the API key.
-        let temporary = path.with_extension("json.tmp");
-        std::fs::write(&temporary, text)
-            .with_context(|| format!("writing {}", temporary.display()))?;
-        std::fs::rename(&temporary, &path)
-            .with_context(|| format!("replacing {}", path.display()))?;
-        Ok(())
+        crate::db::write_settings(&crate::db::open()?, self)
     }
 
     /// Build the backend this configuration asks for.

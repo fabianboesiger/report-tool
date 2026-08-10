@@ -1,26 +1,33 @@
-//! Templates and reports on disk.
+//! Templates and reports, in the database.
 //!
-//! Plain JSON files, one per item, under the platform data directory — not a
-//! database. At this scale a database buys nothing and costs the property that makes
-//! these files useful: a template is a single readable file a user can diff, put in
-//! version control, or send to a colleague.
+//! This module used to open by arguing for one JSON file per item — inspectable,
+//! diffable, emailable. Two things turned that around, both measured in the code that
+//! replaced it: drawing the library list read every byte of every report to pick five
+//! fields out of it, and autosave rewrote both documents plus a template snapshot every
+//! two seconds. See [`crate::db`] for the detail.
+//!
+//! What the files were good for is not lost, only made explicit:
+//! [`export_template`] and [`import_template`] move a template in and out as `.json`.
 //!
 //! ## Every report keeps a copy of its template
 //!
-//! [`Report::template`] is a *snapshot*, not a reference. Templates are meant to be
-//! edited — that is the whole point of the builder — and a report renders by walking
-//! its template alongside the generated value. If reports pointed at a shared
-//! template, renaming a field or deleting a section would silently break every report
-//! ever made from it. Copying a few kilobytes per report removes that class of bug
-//! entirely.
-
-use std::path::Path;
+//! [`Report::template`] is a *snapshot*, not a foreign key, and that is why there is no
+//! relation between the two tables. Templates are meant to be edited — that is the whole
+//! point of the builder — and a report renders by walking its template alongside the
+//! generated value. If reports referenced a shared row, renaming a field or deleting a
+//! section would silently break every report ever made from it.
+//!
+//! The report row also carries `template_name`, denormalised out of that snapshot at
+//! write time. It is what lets the list query be covered by an index instead of reaching
+//! into JSON.
 
 use anyhow::{Context, Result};
 use report_doc::RichDoc;
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::db;
 use crate::template::Template;
 
 /// A report: the notes, what was generated from them, and the template used.
@@ -59,11 +66,11 @@ impl Report {
 
 /// Enough to list something without loading it.
 ///
-/// Deliberately more than an id and a name. The library screen shows which template a
-/// report came from and whether it has been written yet, and finding that out any other
-/// way would mean deserialising every report's notes and prose in order to draw one
-/// list. [`list`] already parses each file into a `Value`; these are two more field
-/// reads out of a value that is in hand.
+/// Deliberately more than an id and a name: the library screen shows which template a
+/// report came from and whether it has been written yet. Every field here is a column,
+/// so building one costs no document text — which is the difference between this and
+/// the file-per-report layout it replaced, where the same list parsed every report in
+/// full.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Summary {
     pub id: Uuid,
@@ -84,72 +91,189 @@ pub struct Summary {
 }
 
 pub fn save_template(template: &Template) -> Result<()> {
-    write_json(&crate::paths::templates_dir()?.join(format!("{}.json", template.id)), template)
+    db::insert_template(&db::open()?, template, now())
 }
 
 pub fn load_template(id: Uuid) -> Result<Template> {
-    read_json(&crate::paths::templates_dir()?.join(format!("{id}.json")))
+    let connection = db::open()?;
+    let body: Option<String> = connection
+        .query_row("SELECT body FROM templates WHERE id = ?1", [id.to_string()], |row| row.get(0))
+        .optional()
+        .context("reading the template")?;
+    let body = body.ok_or_else(|| anyhow::anyhow!("no template with id {id}"))?;
+    serde_json::from_str(&body).context("parsing the stored template")
 }
 
+/// Delete a template. Deleting one that is already gone is the outcome the caller
+/// wanted, so it is not an error.
 pub fn delete_template(id: Uuid) -> Result<()> {
-    remove(&crate::paths::templates_dir()?.join(format!("{id}.json")))
+    db::open()?
+        .execute("DELETE FROM templates WHERE id = ?1", [id.to_string()])
+        .context("deleting the template")?;
+    Ok(())
 }
 
+/// Templates, most recently touched first.
+///
+/// `updated` is now a real column. It used to be the file's mtime, because a template
+/// file carried no timestamp at all — a property of the filesystem rather than of the
+/// data, and one that any copy or sync would silently rewrite.
 pub fn list_templates() -> Result<Vec<Summary>> {
-    let mut templates = list(&crate::paths::templates_dir()?, |value, modified| {
-        Some(Summary {
-            id: value.get("id")?.as_str()?.parse().ok()?,
-            name: value.get("name")?.as_str()?.to_string(),
-            // Templates carry no timestamp of their own, so the file's mtime orders
-            // them. It used to be hardcoded to zero under a comment saying this, which
-            // left the list in whatever order the directory happened to yield.
-            updated: modified,
-            // A template is its own source, and has nothing to be a draft of.
-            template_name: String::new(),
-            generated: false,
+    let connection = db::open()?;
+    let mut statement = connection
+        .prepare("SELECT id, name, updated FROM templates ORDER BY updated DESC, name ASC")
+        .context("preparing the template list")?;
+
+    let rows = statement
+        .query_map([], |row| {
+            let id: String = row.get(0)?;
+            Ok(Summary {
+                // A row whose id will not parse is not worth failing a whole listing
+                // over; nil sorts harmlessly and the name still shows.
+                id: id.parse().unwrap_or(Uuid::nil()),
+                name: row.get(1)?,
+                // Stored as `i64` because SQLite has no unsigned 64-bit integer; these
+                // are epoch seconds, so the round trip is lossless.
+                updated: row.get::<_, i64>(2)? as u64,
+                // A template is its own source, and has nothing to be a draft of.
+                template_name: String::new(),
+                generated: false,
+            })
         })
-    })?;
-    templates.sort_by(|a, b| b.updated.cmp(&a.updated).then_with(|| a.name.cmp(&b.name)));
-    Ok(templates)
+        .context("listing templates")?;
+
+    rows.collect::<rusqlite::Result<Vec<_>>>().context("reading the template list")
 }
 
 pub fn save_report(report: &Report) -> Result<()> {
     let mut report = report.clone();
     report.updated = now();
-    write_json(&crate::paths::reports_dir()?.join(format!("{}.json", report.id)), &report)
+    // Autosave calls this every couple of seconds, so `created` must survive: the
+    // upsert keeps the stored value rather than taking the one in hand, which for a
+    // report assembled fresh by `Workspace::save_report` is simply "now".
+    db::insert_report(&db::open()?, &report)
 }
 
 pub fn load_report(id: Uuid) -> Result<Report> {
-    read_json(&crate::paths::reports_dir()?.join(format!("{id}.json")))
+    let connection = db::open()?;
+    let row = connection
+        .query_row(
+            "SELECT name, template, notes, generated, created, updated
+             FROM reports WHERE id = ?1",
+            [id.to_string()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                ))
+            },
+        )
+        .optional()
+        .context("reading the report")?;
+
+    let (name, template, notes, generated, created, updated) =
+        row.ok_or_else(|| anyhow::anyhow!("no report with id {id}"))?;
+
+    Ok(Report {
+        id,
+        name,
+        template: serde_json::from_str(&template).context("parsing the stored template")?,
+        notes: serde_json::from_str(&notes).context("parsing the stored notes")?,
+        generated: match generated {
+            Some(text) => Some(serde_json::from_str(&text).context("parsing the stored report")?),
+            None => None,
+        },
+        created: created as u64,
+        updated: updated as u64,
+    })
 }
 
+/// Delete a report. Idempotent, for the same reason as [`delete_template`].
 pub fn delete_report(id: Uuid) -> Result<()> {
-    remove(&crate::paths::reports_dir()?.join(format!("{id}.json")))
+    db::open()?
+        .execute("DELETE FROM reports WHERE id = ?1", [id.to_string()])
+        .context("deleting the report")?;
+    Ok(())
 }
 
+/// Reports, most recently worked on first — the one a user wants next is almost always
+/// the one they had open last.
+///
+/// **Reads no document text.** Every column here is small and indexed; the notes, the
+/// generated prose and the template snapshot are never touched. That is the whole reason
+/// this module moved to a database, so it is worth stating where the query lives.
 pub fn list_reports() -> Result<Vec<Summary>> {
-    let mut reports = list(&crate::paths::reports_dir()?, |value, _modified| {
-        Some(Summary {
-            id: value.get("id")?.as_str()?.parse().ok()?,
-            name: value.get("name")?.as_str()?.to_string(),
-            // The report's own stamp, not the file's: `save_report` sets it, and it is
-            // what the sort below and the row's relative time both mean by "updated".
-            updated: value.get("updated").and_then(serde_json::Value::as_u64).unwrap_or(0),
-            template_name: value
-                .get("template")
-                .and_then(|template| template.get("name"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            // `null` until the report has been written once, which is exactly the
-            // Draft/Final distinction the library row draws.
-            generated: value.get("generated").is_some_and(|value| !value.is_null()),
+    let connection = db::open()?;
+    let mut statement = connection
+        .prepare(
+            "SELECT id, name, template_name, updated, generated IS NOT NULL
+             FROM reports ORDER BY updated DESC, name ASC",
+        )
+        .context("preparing the report list")?;
+
+    let rows = statement
+        .query_map([], |row| {
+            let id: String = row.get(0)?;
+            Ok(Summary {
+                id: id.parse().unwrap_or(Uuid::nil()),
+                name: row.get(1)?,
+                template_name: row.get(2)?,
+                updated: row.get::<_, i64>(3)? as u64,
+                // `NULL` until the report has been written once, which is exactly the
+                // Draft/Final distinction the library row draws.
+                generated: row.get(4)?,
+            })
         })
-    })?;
-    // Most recently worked on first: the one a user wants next is almost always the
-    // one they had open last.
-    reports.sort_by(|a, b| b.updated.cmp(&a.updated).then_with(|| a.name.cmp(&b.name)));
-    Ok(reports)
+        .context("listing reports")?;
+
+    rows.collect::<rusqlite::Result<Vec<_>>>().context("reading the report list")
+}
+
+// ---------------------------------------------------------------------------
+// Sharing a template as a file
+// ---------------------------------------------------------------------------
+
+/// A template as portable `.json`.
+///
+/// Pretty-printed, because the point of a file is that a person can read it, diff it and
+/// commit it. This is the property the database took away, handed back deliberately.
+pub fn export_template(template: &Template) -> Result<String> {
+    serde_json::to_string_pretty(template).context("serialising the template")
+}
+
+/// Read a template from exported `.json` and store it under a **fresh id**.
+///
+/// Not the id in the file. Importing a colleague's copy of a template you also have
+/// would otherwise overwrite yours silently — a duplicate is recoverable by deleting
+/// one, a silent overwrite is not. The name gains a suffix if it collides, so the two
+/// are distinguishable in the list.
+pub fn import_template(json: &str) -> Result<Template> {
+    let mut template: Template =
+        serde_json::from_str(json).context("this file is not a report-tool template")?;
+
+    template.id = Uuid::new_v4();
+    let taken: Vec<String> = list_templates()?.into_iter().map(|s| s.name).collect();
+    template.name = unique_name(&template.name, &taken);
+
+    save_template(&template)?;
+    Ok(template)
+}
+
+/// `name`, or `name (2)`, `name (3)`… until it is not already taken.
+fn unique_name(name: &str, taken: &[String]) -> String {
+    if !taken.iter().any(|existing| existing == name) {
+        return name.to_string();
+    }
+    (2..)
+        .map(|n| format!("{name} ({n})"))
+        .find(|candidate| !taken.iter().any(|existing| existing == candidate))
+        // `(2..)` is unbounded, so this cannot be reached; `expect` documents that
+        // rather than inventing a fallback name nobody would ever see.
+        .expect("an unbounded range always yields a free name")
 }
 
 /// Seconds since the epoch.
@@ -234,81 +358,6 @@ fn short_date(when: u64) -> String {
     format!("{day} {}", MONTHS[month - 1])
 }
 
-// ---------------------------------------------------------------------------
-
-fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
-    let text = serde_json::to_string_pretty(value).context("serialising")?;
-    // Through a temporary file and a rename, which is atomic on every platform we
-    // ship to. A crash midway through a direct write would leave a truncated file,
-    // and the report it held would be unopenable rather than merely out of date.
-    let temporary = path.with_extension("json.tmp");
-    std::fs::write(&temporary, text).with_context(|| format!("writing {}", temporary.display()))?;
-    std::fs::rename(&temporary, path).with_context(|| format!("replacing {}", path.display()))?;
-    Ok(())
-}
-
-fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
-    let text =
-        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
-}
-
-fn remove(path: &Path) -> Result<()> {
-    match std::fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        // Deleting something already gone is the outcome the caller wanted.
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error).with_context(|| format!("deleting {}", path.display())),
-    }
-}
-
-/// Read every `*.json` in `dir` and summarise it.
-///
-/// A file that will not parse is logged and skipped rather than failing the listing:
-/// one corrupt report must not make the library unopenable.
-///
-/// The summariser is handed the file's modification time alongside its contents, because
-/// a template carries no timestamp of its own and the mtime is the only thing that can
-/// order one.
-fn list(
-    dir: &Path,
-    summarise: impl Fn(&serde_json::Value, u64) -> Option<Summary>,
-) -> Result<Vec<Summary>> {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error).with_context(|| format!("listing {}", dir.display())),
-    };
-
-    let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        // A filesystem that cannot report a modification time yields zero, which sorts
-        // last rather than failing the listing over a cosmetic column.
-        let modified = entry
-            .metadata()
-            .and_then(|meta| meta.modified())
-            .ok()
-            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|since| since.as_secs())
-            .unwrap_or(0);
-
-        match std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-            .as_ref()
-            .and_then(|value| summarise(value, modified))
-        {
-            Some(summary) => out.push(summary),
-            None => tracing::warn!("store: skipping unreadable {}", path.display()),
-        }
-    }
-    Ok(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,17 +408,16 @@ mod tests {
         assert!(!report.id.is_nil(), "a missing id must be generated, not left nil");
     }
 
-    /// Exercises the real filesystem through `REPORT_DATA_DIR`.
+    /// Exercises the real database through `REPORT_DATA_DIR`.
     ///
-    /// Serialisation is covered above; what this adds is the part that only fails on
-    /// disk — the temp-file rename, listing a directory that does not exist yet, and
-    /// a corrupt file among good ones.
+    /// Serialisation is covered above; what this adds is everything that only shows up
+    /// against SQLite — the upsert, the summary projection, and deleting.
     #[test]
-    fn the_store_round_trips_through_real_files() {
+    fn the_store_round_trips_through_a_real_database() {
         // Holds the shared lock and cleans up on drop; see `crate::testenv`.
         let _dir = crate::testenv::data_dir("store");
 
-        // Listing a library that has never been written must be empty, not an error.
+        // A library that has never been written must list empty, not error.
         assert!(list_reports().unwrap().is_empty());
         assert!(list_templates().unwrap().is_empty());
 
@@ -379,6 +427,8 @@ mod tests {
         let listed = list_templates().unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].name, "Site Inspection");
+        // A real column now, not the file mtime it used to be.
+        assert!(listed[0].updated > 0);
 
         let mut report = Report::new("March visit", template.clone());
         report.notes = report_doc::markdown::from_markdown("north wall cracked");
@@ -387,17 +437,15 @@ mod tests {
         let loaded = load_report(report.id).unwrap();
         assert_eq!(loaded.name, "March visit");
         assert_eq!(loaded.notes, report.notes);
+        assert_eq!(loaded.template, report.template);
         assert!(loaded.updated > 0, "saving must stamp the time");
 
-        // The library row's two columns, read out of the file rather than by loading it.
+        // The library row's two extra columns, read without touching a document.
         let listed = list_reports().unwrap();
         assert_eq!(listed[0].template_name, "Site Inspection");
         assert!(!listed[0].generated, "a report with no prose yet is a draft");
 
-        // A template's summary has a real mtime now, not the zero it used to carry.
-        assert!(list_templates().unwrap()[0].updated > 0, "the file's mtime must order it");
-
-        // Saving again must overwrite rather than leave two entries.
+        // Saving again must update rather than duplicate.
         save_report(&loaded).unwrap();
         assert_eq!(list_reports().unwrap().len(), 1);
 
@@ -406,24 +454,70 @@ mod tests {
         written.generated = Some(report_doc::markdown::from_markdown("# Findings\n\nAll noted."));
         save_report(&written).unwrap();
         assert!(list_reports().unwrap()[0].generated);
-
-        // One unreadable file must not make the whole library unopenable.
-        std::fs::write(crate::paths::reports_dir().unwrap().join("broken.json"), "{ not json")
-            .unwrap();
-        assert_eq!(list_reports().unwrap().len(), 1, "the good report is still listed");
-
-        // No leftover temporaries from the atomic writes.
-        let leftovers: Vec<_> = std::fs::read_dir(crate::paths::reports_dir().unwrap())
-            .unwrap()
-            .flatten()
-            .filter(|e| e.path().to_string_lossy().ends_with(".tmp"))
-            .collect();
-        assert!(leftovers.is_empty(), "a temp file survived the rename");
+        assert!(load_report(report.id).unwrap().generated.is_some());
 
         delete_report(report.id).unwrap();
         assert!(load_report(report.id).is_err());
         // Deleting twice is the caller getting what they asked for.
         delete_report(report.id).unwrap();
+        assert!(list_reports().unwrap().is_empty());
+
+        delete_template(template.id).unwrap();
+        delete_template(template.id).unwrap();
+        assert!(list_templates().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_missing_id_is_an_error_rather_than_a_default_value() {
+        // Silently returning an empty report would look like data loss to whoever
+        // opened it.
+        let _dir = crate::testenv::data_dir("store-missing");
+        assert!(load_report(Uuid::new_v4()).is_err());
+        assert!(load_template(Uuid::new_v4()).is_err());
+    }
+
+    #[test]
+    fn an_exported_template_can_be_imported_beside_the_original() {
+        // The property the database took away: a template as a file you can send someone.
+        let _dir = crate::testenv::data_dir("store-share");
+
+        let template = fixture::template();
+        save_template(&template).unwrap();
+        let json = export_template(&template).unwrap();
+
+        let imported = import_template(&json).unwrap();
+
+        // A fresh id, not the one in the file. Preserving it would silently overwrite
+        // the local copy, which is not recoverable; a duplicate is.
+        assert_ne!(imported.id, template.id);
+        // Same structure, so it still compiles and renders.
+        assert_eq!(imported.nodes, template.nodes);
+        // Distinguishable in the list.
+        assert_eq!(imported.name, "Site Inspection (2)");
+
+        let names: Vec<String> = list_templates().unwrap().into_iter().map(|s| s.name).collect();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"Site Inspection".to_string()));
+        assert!(names.contains(&"Site Inspection (2)".to_string()));
+
+        // Importing a third time keeps counting rather than colliding.
+        assert_eq!(import_template(&json).unwrap().name, "Site Inspection (3)");
+    }
+
+    #[test]
+    fn importing_something_that_is_not_a_template_says_so() {
+        let _dir = crate::testenv::data_dir("store-badimport");
+        let error = import_template("{\"nope\": true}").unwrap_err().to_string();
+        assert!(error.contains("not a report-tool template"), "{error}");
+        assert!(import_template("this is not json at all").is_err());
+    }
+
+    #[test]
+    fn unique_name_counts_upward_past_the_names_already_taken() {
+        let taken = ["Visit".to_string(), "Visit (2)".to_string(), "Visit (4)".to_string()];
+        assert_eq!(unique_name("Visit", &taken), "Visit (3)");
+        assert_eq!(unique_name("Other", &taken), "Other");
+        assert_eq!(unique_name("Visit", &[]), "Visit");
     }
 
     #[test]

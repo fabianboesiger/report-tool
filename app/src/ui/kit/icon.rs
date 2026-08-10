@@ -1,7 +1,31 @@
-//! The icon set.
+//! The icon set: fourteen glyphs vendored from [Lucide] v1.31.0 (ISC).
 //!
-//! Fourteen line icons, each stored as the *inner* markup of its `<svg>`, copied out of
-//! `design/1-aperture.html`. Two choices worth defending:
+//! Each is stored as the *inner* markup of its `<svg>`, taken verbatim from
+//! `lucide-static`. Lucide draws on a 24-unit grid with `fill="none"`,
+//! `stroke="currentColor"`, round caps and round joins — exactly what [`Glyph`] puts on
+//! the wrapper — so the paths drop in without adjustment.
+//!
+//! ## These used to be traced by hand, and one of them was wrong
+//!
+//! The previous set was copied out of a mockup by hand. The gear was visibly broken: its
+//! path ran `V21` straight into `v-.1`, `H3` into `h.1`, and closed an arc at `13 4.6`
+//! where the tooth belongs near the top centre. It was still *syntactically* valid path
+//! data, so nothing caught it — a malformed icon renders as a smudge, not as an error.
+//! That is the argument for vendoring upstream geometry rather than transcribing it, and
+//! for recording below exactly where it came from.
+//!
+//! ## Refreshing them
+//!
+//! Each arm is commented with its upstream name. To re-fetch one:
+//!
+//! ```sh
+//! curl -s https://unpkg.com/lucide-static@1.31.0/icons/settings.svg
+//! ```
+//!
+//! Strip the `<svg>` wrapper and paste the inside. Bump the version in this comment when
+//! you do, so the next person knows which release the set corresponds to.
+//!
+//! ## Two structural choices
 //!
 //! - **An enum, not a module of components or a string-keyed lookup.** The set is closed
 //!   and small, and a `match` the compiler insists is exhaustive means an icon can never
@@ -9,33 +33,47 @@
 //!   sheet, and one that shows up as a blank space rather than as an error.
 //! - **`dangerous_inner_html`, not rsx children.** Transcribing each path as
 //!   `path { d: "…" }` would triple the line count and re-copy coordinates that are
-//!   already correct, and every re-copy is a chance to get one wrong. The markup is a
-//!   `&'static str` from this file, so there is no untrusted input for the "dangerous" in
-//!   the name to apply to — the same reasoning that already puts both stylesheets in
-//!   `style { dangerous_inner_html: … }`.
+//!   already correct, and every re-copy is a chance to get one wrong — which is precisely
+//!   how the old gear broke. The markup is a `&'static str` from this file, so there is no
+//!   untrusted input for the "dangerous" in the name to apply to.
 //!
 //! The `<svg>` itself comes from the rsx prelude rather than being part of the string,
 //! because that is what carries the SVG namespace: an `svg` element created in the HTML
 //! namespace parses without complaint and draws nothing.
+//!
+//! [Lucide]: https://lucide.dev
 
 use dioxus::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Icon {
-    /// The brand mark: two concentric circles, an aperture.
+    /// The brand mark. Lucide `aperture`.
     Aperture,
+    /// Lucide `file-text`.
     Document,
+    /// Lucide `pencil`.
     Pencil,
+    /// A framed panel; templates. Lucide `panels-top-left`.
     Layout,
+    /// Settings. Lucide `settings`.
     Cog,
+    /// Lucide `moon`.
     Moon,
+    /// Lucide `search`.
     Search,
+    /// Lucide `plus`.
     Plus,
+    /// Lucide `download`.
     Download,
+    /// Generate. Lucide `sparkles`.
     Sparkle,
+    /// Lucide `chevron-up`.
     ChevronUp,
+    /// Lucide `chevron-down`.
     ChevronDown,
+    /// Lucide `x`.
     Close,
+    /// Lucide `trash-2`.
     Trash,
 }
 
@@ -61,44 +99,68 @@ impl Icon {
         Icon::Trash,
     ];
 
+    /// The inner markup, verbatim from `lucide-static`.
+    ///
+    /// `r##"…"##` rather than `r#"…"#`: Lucide's markup contains `"` but no `"#`, and the
+    /// extra hash leaves room for a future path that does.
     fn body(self) -> &'static str {
         match self {
-            Icon::Aperture => r#"<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.2"/>"#,
+            // lucide `aperture`
+            Icon::Aperture => {
+                r##"<circle cx="12" cy="12" r="10"/> <path d="m14.31 8 5.74 9.94"/> <path d="M9.69 8h11.48"/> <path d="m7.38 12 5.74-9.94"/> <path d="M9.69 16 3.95 6.06"/> <path d="M14.31 16H2.83"/> <path d="m16.62 12-5.74 9.94"/>"##
+            }
+            // lucide `file-text`
             Icon::Document => {
-                r#"<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>"#
+                r##"<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/> <path d="M14 2v5a1 1 0 0 0 1 1h5"/> <path d="M10 9H8"/> <path d="M16 13H8"/> <path d="M16 17H8"/>"##
             }
+            // lucide `pencil`
             Icon::Pencil => {
-                r#"<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>"#
+                r##"<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/> <path d="m15 5 4 4"/>"##
             }
+            // lucide `panels-top-left`
             Icon::Layout => {
-                r#"<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12"/>"#
+                r##"<rect width="18" height="18" x="3" y="3" rx="2"/> <path d="M3 9h18"/> <path d="M9 21V9"/>"##
             }
+            // lucide `settings`
             Icon::Cog => {
-                r#"<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 15H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 9 4.6h.1A2 2 0 1 1 13 4.6V4.7A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.9.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 19.4 9V9a2 2 0 1 1 0 4z"/>"#
+                r##"<path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/> <circle cx="12" cy="12" r="3"/>"##
             }
-            Icon::Moon => r#"<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>"#,
-            Icon::Search => r#"<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>"#,
-            Icon::Plus => r#"<path d="M12 5v14M5 12h14"/>"#,
+            // lucide `moon`
+            Icon::Moon => {
+                r##"<path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/>"##
+            }
+            // lucide `search`
+            Icon::Search => r##"<path d="m21 21-4.34-4.34"/> <circle cx="11" cy="11" r="8"/>"##,
+            // lucide `plus`
+            Icon::Plus => r##"<path d="M5 12h14"/> <path d="M12 5v14"/>"##,
+            // lucide `download`
             Icon::Download => {
-                r#"<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/>"#
+                r##"<path d="M12 15V3"/> <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/> <path d="m7 10 5 5 5-5"/>"##
             }
+            // lucide `sparkles`
             Icon::Sparkle => {
-                r#"<path d="M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>"#
+                r##"<path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/> <path d="M20 2v4"/> <path d="M22 4h-4"/> <circle cx="4" cy="20" r="2"/>"##
             }
-            Icon::ChevronUp => r#"<path d="m18 15-6-6-6 6"/>"#,
-            Icon::ChevronDown => r#"<path d="m6 9 6 6 6-6"/>"#,
-            Icon::Close => r#"<path d="M18 6 6 18M6 6l12 12"/>"#,
+            // lucide `chevron-up`
+            Icon::ChevronUp => r##"<path d="m18 15-6-6-6 6"/>"##,
+            // lucide `chevron-down`
+            Icon::ChevronDown => r##"<path d="m6 9 6 6 6-6"/>"##,
+            // lucide `x`
+            Icon::Close => r##"<path d="M18 6 6 18"/> <path d="m6 6 12 12"/>"##,
+            // lucide `trash-2`
             Icon::Trash => {
-                r#"<path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>"#
+                r##"<path d="M10 11v6"/> <path d="M14 11v6"/> <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/> <path d="M3 6h18"/> <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>"##
             }
         }
     }
 
     /// Stroke weight, per icon rather than one value on the `<svg>`.
     ///
-    /// A plus or a chevron drawn at 14px with a 1.6 stroke reads as a smudge, and a 22px
-    /// brand mark drawn at 2 reads as heavy. The mockup already varies it; this is where
-    /// that variation is kept in one place instead of at every call site.
+    /// Lucide is designed at 2, and most of these deliberately sit below it: at the sizes
+    /// the stylesheet renders them, a 2-weight chevron in a 14px slot reads as a smudge
+    /// while a 22px brand mark at 2 reads as heavy. The shapes are upstream's; the weight
+    /// is this app's, and keeping the choice here is what stops it being re-decided at
+    /// every call site.
     fn stroke(self) -> &'static str {
         match self {
             Icon::Plus | Icon::ChevronUp | Icon::ChevronDown | Icon::Close => "2",
@@ -141,7 +203,7 @@ mod tests {
             let body = icon.body();
             assert!(!body.trim().is_empty(), "{icon:?} draws nothing");
             // The wrapper is drawn once by `Glyph`. A nested one would inherit neither
-            // the stroke width nor the size, and would silently render at 0×0.
+            // the stroke width nor the size, and would silently render at 0x0.
             assert!(!body.contains("<svg"), "{icon:?} carries its own <svg>");
             assert_eq!(
                 body.matches('"').count() % 2,
@@ -149,5 +211,49 @@ mod tests {
                 "{icon:?} has an unclosed attribute, which swallows the rest of the markup"
             );
         }
+    }
+
+    /// Guards the two ways vendored markup goes wrong without anyone noticing.
+    #[test]
+    fn every_icon_is_a_closed_set_of_drawable_shapes() {
+        const DRAWABLE: [&str; 5] = ["<path", "<circle", "<rect", "<line", "<polyline"];
+
+        for icon in Icon::ALL {
+            let body = icon.body();
+            assert!(
+                DRAWABLE.iter().any(|tag| body.contains(tag)),
+                "{icon:?} contains no drawable element"
+            );
+            // Every tag self-closes, because these are pasted into an existing `<svg>`
+            // rather than parsed as a document: an unclosed `<path>` would swallow its
+            // siblings and the icon would lose half its strokes.
+            assert_eq!(
+                body.matches('<').count(),
+                body.matches("/>").count(),
+                "{icon:?} has a tag that does not self-close"
+            );
+            // Lucide's own attributes belong on the wrapper, not on the shapes. One that
+            // arrived inline would override `Glyph` and ignore the stroke weight above.
+            for attribute in ["stroke-width", "stroke=", "fill="] {
+                assert!(
+                    !body.contains(attribute),
+                    "{icon:?} carries `{attribute}` inline, which overrides the wrapper"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_gear_is_the_real_one() {
+        // The icon that prompted the change. The hand-traced version closed a tooth at
+        // `13 4.6` and ran `V21` into `v-.1`; Lucide's is six arcs of radius 2.34 around
+        // a centred circle.
+        let gear = Icon::Cog.body();
+        assert!(gear.contains(r#"<circle cx="12" cy="12" r="3"/>"#), "{gear}");
+        // Twelve arc segments — six teeth and the six arcs joining them. Counted by the
+        // radius pair rather than by the `a` command, of which there are only two: SVG
+        // lets a repeated command drop its letter, so ten of the twelve arcs are implicit.
+        assert_eq!(gear.matches("2.34 2.34").count(), 12, "six teeth and six joins");
+        assert!(!gear.contains("V21"), "the malformed vertical from the traced version");
     }
 }

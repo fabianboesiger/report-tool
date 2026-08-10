@@ -13,6 +13,12 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
 directories = { workspace = true }
+# `bundled` compiles SQLite itself rather than linking the system one — far more
+# predictable across macOS, Windows and Linux, at the cost of needing a C compiler.
+# On every target but wasm, `libsqlite3-sys` is a non-optional dependency of rusqlite
+# and the wasm FFI backend in its default features is inert, so plain `bundled` is all
+# that is needed here.
+rusqlite = { version = "0.40", features = ["bundled"] }
 
 # Heavy ML stack, only compiled with the `inference` feature so the template
 # compilers, the renderer and the UI can be built and tested in seconds without

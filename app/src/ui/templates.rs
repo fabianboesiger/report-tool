@@ -3,6 +3,12 @@
 //! Two states in one screen, held in a `Signal<Option<Uuid>>` local to it rather than as a
 //! fifth [`Screen`](crate::ui::Screen) variant — "which template am I editing" is state of
 //! this screen, not of the app.
+//!
+//! ## Export and import
+//!
+//! Templates live in a database, so a template is no longer a file that can be emailed to
+//! a colleague or committed alongside the reports it produces. These two buttons hand that
+//! back deliberately rather than letting it disappear with the storage change.
 
 use dioxus::prelude::*;
 use report_core::store;
@@ -65,6 +71,11 @@ pub fn TemplatesScreen(template: Signal<Template>) -> Element {
                         },
                     }
                     Button {
+                        label: "Export".to_string(),
+                        variant: Variant::Normal,
+                        onclick: move |_| export(template.read().clone(), message),
+                    }
+                    Button {
                         label: "Save template".to_string(),
                         variant: Variant::Primary,
                         onclick: move |_| save(),
@@ -94,6 +105,12 @@ pub fn TemplatesScreen(template: Signal<Template>) -> Element {
                 count => format!("The shape each kind of report follows · {count} saved"),
             },
             actions: rsx! {
+                Button {
+                    label: "Import".to_string(),
+                    icon: Icon::Download,
+                    variant: Variant::Normal,
+                    onclick: move |_| import(revision, message),
+                }
                 Button {
                     label: "New template".to_string(),
                     icon: Icon::Plus,
@@ -164,6 +181,78 @@ pub fn TemplatesScreen(template: Signal<Template>) -> Element {
                 }
             }
         }
+    }
+}
+
+/// Write a template out as `.json` for someone to send or commit.
+fn export(template: Template, mut message: Signal<Option<(NoticeKind, String)>>) {
+    let json = match store::export_template(&template) {
+        Ok(json) => json,
+        Err(error) => {
+            message.set(Some((NoticeKind::Error, format!("{error:#}"))));
+            return;
+        }
+    };
+    let suggested = format!("{}.json", file_stem(&template.name));
+
+    spawn(async move {
+        let Some(file) = rfd::AsyncFileDialog::new()
+            .set_file_name(&suggested)
+            .add_filter("Template", &["json"])
+            .save_file()
+            .await
+        else {
+            // Cancelling is a normal outcome, not a failure.
+            return;
+        };
+        match file.write(json.as_bytes()).await {
+            Ok(()) => {
+                message.set(Some((NoticeKind::Ok, format!("Exported to {}", file.file_name()))))
+            }
+            Err(error) => message.set(Some((NoticeKind::Error, format!("Export failed: {error}")))),
+        }
+    });
+}
+
+/// Read a template someone sent, and store it as a new one.
+fn import(mut revision: Signal<u64>, mut message: Signal<Option<(NoticeKind, String)>>) {
+    spawn(async move {
+        let Some(file) =
+            rfd::AsyncFileDialog::new().add_filter("Template", &["json"]).pick_file().await
+        else {
+            return;
+        };
+        let bytes = file.read().await;
+        let text = match std::str::from_utf8(&bytes) {
+            Ok(text) => text,
+            Err(_) => {
+                message.set(Some((NoticeKind::Error, "That file is not text".to_string())));
+                return;
+            }
+        };
+        // `import_template` assigns a fresh id and a non-colliding name, so this never
+        // overwrites a template already here.
+        match store::import_template(text) {
+            Ok(imported) => {
+                revision.with_mut(|count| *count += 1);
+                message.set(Some((NoticeKind::Ok, format!("Imported \"{}\"", imported.name))));
+            }
+            Err(error) => message.set(Some((NoticeKind::Error, format!("{error:#}")))),
+        }
+    });
+}
+
+/// A filename-safe version of a template's name.
+fn file_stem(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect();
+    let trimmed = cleaned.trim_matches('-');
+    if trimmed.is_empty() {
+        "template".to_string()
+    } else {
+        trimmed.to_string()
     }
 }
 

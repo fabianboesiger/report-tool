@@ -34,6 +34,10 @@ pub mod backend;
 /// The models the app fetches for itself.
 pub mod catalog;
 pub mod compile;
+
+/// The database behind `store` and `Settings`: opening it, migrating it, and the
+/// one-time import of the JSON files that used to be the storage layer.
+pub mod db;
 /// Resumable downloads. Only `download::fetch` needs an HTTP client; the rest of
 /// the module compiles everywhere so the UI can describe a download in any build.
 pub mod download;

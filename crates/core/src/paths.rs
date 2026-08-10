@@ -37,21 +37,35 @@ pub fn data_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// Persisted user settings (`settings.json` under the data dir).
-pub fn settings_path() -> Result<PathBuf> {
+/// The database holding templates, reports and settings.
+///
+/// One file, so backing the library up is copying it. Not created here — opening it is
+/// [`crate::db::open`]'s job, which also has to bring the schema up to date.
+pub fn db_path() -> Result<PathBuf> {
+    Ok(data_dir()?.join("report-tool.db"))
+}
+
+// --- legacy locations ------------------------------------------------------
+//
+// Templates, reports and settings used to be one JSON file each. Everything below
+// exists **only** so `crate::db::import_legacy` can bring that data into the database
+// on first launch; nothing else should reach for them. They are not `ensure`d any more
+// either — creating a directory in order to find it empty is how the importer used to
+// end up with an empty `templates/` beside the database it had just migrated into.
+
+/// Where settings used to live.
+pub fn legacy_settings_path() -> Result<PathBuf> {
     Ok(data_dir()?.join("settings.json"))
 }
 
-/// Directory holding the user's templates, created if missing. One
-/// `<uuid>.json` per template — plain files rather than a database, so they are
-/// inspectable, diffable and trivially shareable between users.
-pub fn templates_dir() -> Result<PathBuf> {
-    ensure(data_dir()?.join("templates"))
+/// Where templates used to live, one `<uuid>.json` each.
+pub fn legacy_templates_dir() -> Result<PathBuf> {
+    Ok(data_dir()?.join("templates"))
 }
 
-/// Directory holding the user's reports, created if missing (`<uuid>.json` each).
-pub fn reports_dir() -> Result<PathBuf> {
-    ensure(data_dir()?.join("reports"))
+/// Where reports used to live, one `<uuid>.json` each.
+pub fn legacy_reports_dir() -> Result<PathBuf> {
+    Ok(data_dir()?.join("reports"))
 }
 
 /// Downloaded model weights (`<data_dir>/models`).

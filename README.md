@@ -83,14 +83,45 @@ quality than a quantization applied afterwards.
 percent of word error rate, and smaller than `medium`. The multilingual build,
 because these notes are as likely to be German as English.
 
-Data lives under the platform data directory (`~/Library/Application Support/ch.ajila.report-tool`
-on macOS). `REPORT_DATA_DIR` overrides it, which also makes a portable install possible.
+## Storage
+
+Templates, reports and settings live in one SQLite file, `report-tool.db`, under the
+platform data directory (`~/Library/Application Support/ch.ajila.report-tool` on macOS).
+`REPORT_DATA_DIR` overrides the location, which makes a portable install possible and is
+what lets the storage tests run against real files.
+
+They were previously one JSON file each. Two things decided the change, both measurable:
+
+- **Listing the library read every byte of every report.** Summarising one meant parsing
+  the whole file, and a report holds its notes, its generated prose *and* a template
+  snapshot. The list needs five small fields — for one report here that is 75 bytes
+  against 1,789, and the ratio grows with the library. `list_reports` is now covered by
+  an index and reads no document text.
+- **Autosave rewrites a report every two seconds.** As files, typing a sentence in the
+  notes re-serialised the generated report and the template snapshot too.
+
+Two things follow from it:
+
+- **Templates export and import as `.json`** from the Templates screen. A template used
+  to be a file you could email a colleague or commit; the buttons hand that back rather
+  than letting it vanish with the storage change. An import always lands as a new
+  template — never overwriting one you already have.
+- **A report still carries a snapshot of its template**, not a reference, which is why
+  there is no relation between the two tables. Editing a template must not reach back
+  into reports already written from it.
+
+The first launch after upgrading imports any old `templates/`, `reports/` and
+`settings.json`, then renames them to `*.imported`. **Renamed, not deleted** — that code
+runs once, on data with no other copy. A file that will not parse is skipped with a
+warning rather than failing the import.
 
 ## Build prerequisites
 
-The local engines are C++. A `--no-default-features` build needs none of this.
+The local engines are C++, and SQLite is C.
 
-**All platforms:** CMake and a C++ compiler.
+**All platforms:** a C compiler for SQLite, plus CMake and a C++ compiler for the
+inference engines. A `--no-default-features` build needs only the C compiler — it used to
+need no native toolchain at all, and the SQLite dependency changed that.
 
 **Linux** — Dioxus desktop links webkit2gtk, and `cpal` needs ALSA:
 
@@ -136,3 +167,10 @@ cargo run -p report-core --example llm_smoke --features inference,metal -- model
 
 `REPORT_GBNF` overrides the emitted grammar in that example, for isolating which
 construct a given llama.cpp build rejects.
+
+## Third-party
+
+The icon set in `app/src/ui/kit/icon.rs` is vendored from [Lucide](https://lucide.dev)
+v1.31.0, ISC licensed. The full notice — which ISC requires be kept with the copies — is
+in [`licenses/LICENSE-lucide`](licenses/LICENSE-lucide). Each `match` arm names its
+upstream icon so the set can be refreshed against a later release.
