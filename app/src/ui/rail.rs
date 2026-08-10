@@ -10,7 +10,6 @@ use crate::ui::Screen;
 pub fn Rail(screen: Signal<Screen>, settings: Signal<Settings>) -> Element {
     let provider = settings.read().provider;
     let (where_title, where_detail) = where_line(provider, &settings.read());
-    let appearance = settings.read().appearance;
 
     rsx! {
         aside { class: "rail",
@@ -52,23 +51,6 @@ pub fn Rail(screen: Signal<Screen>, settings: Signal<Settings>) -> Element {
                 "{where_detail}"
             }
 
-            div { class: "rail-foot",
-                button {
-                    r#type: "button",
-                    onclick: move |_| {
-                        let next = settings.read().appearance.next();
-                        settings.write().appearance = next;
-                        // Written straight away, unlike everything in the settings panel.
-                        // Picking a theme is a complete decision the moment it is made; a
-                        // half-typed API key is not.
-                        if let Err(error) = settings.read().save() {
-                            tracing::warn!("settings: could not persist appearance: {error:#}");
-                        }
-                    },
-                    Glyph { icon: Icon::Moon }
-                    "{appearance.label()}"
-                }
-            }
         }
     }
 }

@@ -114,13 +114,26 @@ pub enum Provider {
 }
 
 impl Default for Provider {
-    /// Remote where there is a connector to use, otherwise the stub.
+    /// **On this computer**, wherever the engine is compiled in.
     ///
-    /// A `--no-default-features` build has no way to reach a server, and defaulting
-    /// to something it cannot do would greet the user with an error on the first
-    /// click rather than with a working app.
+    /// This is a privacy default, and it is the one the app should have shipped with.
+    /// Notes taken on a site visit are somebody's building, tenant or defect; sending
+    /// them to a third party should be a decision the user makes, not one they discover
+    /// they already made. It also needs no account and no API key, so the app works out
+    /// of the box.
+    ///
+    /// The cost is that a fresh install cannot generate until the model download
+    /// finishes. That is a visible, self-explaining wait — the progress bar is on
+    /// screen and [`Settings::backend`] says so in as many words — whereas defaulting
+    /// to a server asks for an address and a key before anything works at all.
+    ///
+    /// Falls back in order of what the build can actually do, because defaulting to
+    /// something a build cannot perform would greet the user with an error rather than
+    /// a working app.
     fn default() -> Self {
-        if cfg!(feature = "remote") {
+        if cfg!(feature = "inference") {
+            Provider::Local
+        } else if cfg!(feature = "remote") {
             Provider::Remote
         } else {
             Provider::Stub
@@ -403,6 +416,36 @@ mod tests {
         assert_eq!(Theme::Dark.attribute(), "dark");
         assert_eq!(serde_json::to_string(&Theme::Dark).unwrap(), r#""dark""#);
         assert_eq!(serde_json::from_str::<Theme>(r#""light""#).unwrap(), Theme::Light);
+    }
+
+    #[test]
+    fn a_fresh_install_writes_reports_on_this_computer() {
+        // A product decision, pinned so it cannot drift back with a refactor. Notes from
+        // a site visit are somebody's building; sending them to a third party has to be
+        // something the user chose, not something they discover they defaulted into.
+        //
+        // Asserted per build rather than unconditionally, because the fallback order is
+        // part of the same decision: default to whatever this build can actually do, or
+        // the first click is an error instead of a report.
+        let provider = Settings::default().provider;
+        if cfg!(feature = "inference") {
+            assert_eq!(provider, Provider::Local, "the engine is here, so use it");
+        } else if cfg!(feature = "remote") {
+            assert_eq!(provider, Provider::Remote, "no local engine; a server is the next best");
+        } else {
+            assert_eq!(provider, Provider::Stub, "nothing else in this build works");
+        }
+    }
+
+    #[cfg(all(feature = "inference", feature = "worker"))]
+    #[test]
+    fn a_fresh_install_explains_the_wait_rather_than_failing_blankly() {
+        // The cost of defaulting to Local: until the 5 GB download lands there is no
+        // model, and pressing Generate has to say why in terms the user can act on.
+        let _dir = crate::testenv::data_dir("settings-fresh");
+        let error = Settings::default().backend().map(|b| b.describe()).unwrap_err().to_string();
+        assert!(error.contains("still downloading"), "{error}");
+        assert!(error.contains("Settings"), "and how to bypass it: {error}");
     }
 
     #[test]

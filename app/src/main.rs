@@ -46,7 +46,30 @@ fn main() {
     // must serve the pipe and never open a window. `run_child` does not return.
     report_core::worker::take_over_if_worker();
 
-    dioxus::launch(App);
+    dioxus::LaunchBuilder::desktop().with_cfg(window()).launch(App);
+}
+
+/// The window the app opens in.
+///
+/// Sized for what is actually on screen: a fixed rail, and a body that is two panes side
+/// by side almost everywhere — notes beside the written report, the template beside the
+/// prompt it produces. At the default 800×600 a webview gives each pane about 340 logical
+/// pixels, which is narrower than the prose in it, so both wrap into columns and the app
+/// looks broken before it has done anything.
+///
+/// The minimum is where the two-pane layout stops being usable rather than where it stops
+/// rendering; below it the panes are worth less than the space they cost, and the
+/// stylesheet drops to one column.
+fn window() -> dioxus::desktop::Config {
+    use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
+
+    Config::new().with_window(
+        WindowBuilder::new()
+            // Also the macOS menu-bar name and what a window manager labels it.
+            .with_title("Report tool")
+            .with_inner_size(LogicalSize::new(1360.0, 900.0))
+            .with_min_inner_size(LogicalSize::new(880.0, 600.0)),
+    )
 }
 
 #[component]
@@ -60,13 +83,26 @@ fn App() -> Element {
 
     let screen = use_signal(|| Screen::Reports);
     let settings = use_signal(Settings::load);
-    let template = use_signal(starter_template);
+
+    // **Two templates, not one.** These were a single signal, and sharing it was a data
+    // bug rather than a shortcut: opening a template on the Templates screen reassigned the
+    // open report's snapshot, autosave subscribes to that signal, and the report was
+    // rewritten on disk to follow a template nobody had chosen for it. A snapshot exists
+    // precisely so editing a template cannot reach into reports already written from it,
+    // and one shared signal handed that protection straight back.
+    //
+    // The report's template changes only when a report is opened, or when someone picks a
+    // different one for it — see `ui::template_picker`.
+    let report_template = use_signal(starter_template);
+    // The builder's working copy. Editing it touches no report until it is saved and a
+    // report is pointed at it.
+    let editing_template = use_signal(starter_template);
 
     // Owned here rather than inside a screen, so leaving the editor and coming back finds
     // the notes intact. Only the editor's focus guard resets, which is what leaving a text
     // field should do anyway.
     let workspace = Workspace {
-        template,
+        template: report_template,
         notes: use_signal(RichDoc::empty_paragraph),
         generated: use_signal(RichDoc::empty_paragraph),
         has_report: use_signal(|| false),
@@ -82,10 +118,11 @@ fn App() -> Element {
     let save_state = use_autosave(workspace);
     let mut status = use_signal(|| Status::Idle);
 
-    // The developer group in Settings reads the working template through context rather
-    // than a prop, so nothing on the path down to it has to carry a parameter that only
-    // exists in a debug build.
-    use_context_provider(|| template);
+    // The developer group in Settings reads a template through context rather than a prop,
+    // so nothing on the path down to it has to carry a parameter that only exists in a
+    // debug build. It shows "what the model is actually sent", so it is the *report's*
+    // template it needs, not whatever the builder happens to have open.
+    use_context_provider(|| report_template);
 
     // A callback rather than a closure so it stays `Copy` across the rsx tree.
     let run = use_callback(move |_: ()| {
@@ -144,7 +181,7 @@ fn App() -> Element {
                             }
                         },
                         Screen::Templates => rsx! {
-                            TemplatesScreen { template }
+                            TemplatesScreen { template: editing_template }
                         },
                         Screen::Settings => rsx! {
                             SettingsPanel { settings }

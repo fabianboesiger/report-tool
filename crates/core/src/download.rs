@@ -65,6 +65,37 @@ pub fn resume_offset(dest: &Path) -> u64 {
     std::fs::metadata(part).map(|m| m.len()).unwrap_or(0)
 }
 
+/// Delete a partial download that can no longer be resumed, returning bytes reclaimed.
+///
+/// Once `dest` exists the file is whole, and any `.part` beside it is dead weight — it
+/// cannot be resumed into anything, and it is the same order of size as the model itself.
+/// A 2.5 GB orphan showed up in the author's own data directory next to a completed 5 GB
+/// download, and nothing would ever have reclaimed it: [`fetch`] returns early when the
+/// destination is present, and the code that decides a model is ready never looked at the
+/// partial file at all.
+///
+/// Failures are logged, not returned. This is housekeeping — a `.part` that cannot be
+/// deleted is a wasted gigabyte, not a reason to stop the caller doing its real work.
+pub fn discard_partial(dest: &Path) -> u64 {
+    let (part, etag) = partial_paths(dest);
+    let mut reclaimed = 0;
+    for path in [part, etag] {
+        let Ok(size) = std::fs::metadata(&path).map(|meta| meta.len()) else {
+            continue;
+        };
+        match std::fs::remove_file(&path) {
+            Ok(()) => {
+                reclaimed += size;
+                tracing::info!("download: removed stale {}", path.display());
+            }
+            Err(error) => {
+                tracing::warn!("download: could not remove {}: {error}", path.display())
+            }
+        }
+    }
+    reclaimed
+}
+
 /// How many times in a row an attempt may fail *without moving the download forward*.
 ///
 /// Reset by any progress at all, so a connection that drops every few hundred
@@ -94,6 +125,10 @@ fn backoff(stalled: u32) -> std::time::Duration {
 #[cfg(feature = "download")]
 pub async fn fetch(url: &str, dest: &Path, mut on_progress: impl FnMut(Progress)) -> Result<()> {
     if is_complete(dest) {
+        // Belt and braces: the caller normally never gets here for a finished download,
+        // because the model is reported ready without asking. `models::use_model_downloads`
+        // does the same sweep for that case.
+        discard_partial(dest);
         return Ok(());
     }
     if let Some(parent) = dest.parent() {
@@ -347,6 +382,32 @@ mod tests {
 
         let ordinary = anyhow::anyhow!("the connection dropped").context("downloading");
         assert!(ordinary.downcast_ref::<Fatal>().is_none());
+    }
+
+    #[test]
+    fn a_partial_beside_a_finished_download_is_reclaimed() {
+        // The bug this exists for: a 2.5 GB `.part` sat next to a completed 5 GB model in
+        // the author's data directory, and no code path would ever have looked at it.
+        let dir = std::env::temp_dir().join(format!("rt-orphan-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("model.gguf");
+
+        std::fs::write(&dest, vec![0u8; 64]).unwrap();
+        std::fs::write(dir.join("model.gguf.part"), vec![0u8; 4096]).unwrap();
+        std::fs::write(dir.join("model.gguf.part.etag"), "abc").unwrap();
+
+        let reclaimed = discard_partial(&dest);
+        assert_eq!(reclaimed, 4096 + 3, "both the partial file and its sidecar");
+        assert!(!dir.join("model.gguf.part").exists());
+        assert!(!dir.join("model.gguf.part.etag").exists());
+        // And emphatically not the finished download.
+        assert!(dest.is_file(), "the completed model must survive the tidy-up");
+        assert_eq!(std::fs::metadata(&dest).unwrap().len(), 64);
+
+        // Idempotent: nothing left to reclaim, and not an error.
+        assert_eq!(discard_partial(&dest), 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

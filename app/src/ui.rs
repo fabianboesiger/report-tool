@@ -9,6 +9,7 @@ pub mod rail;
 pub mod reports;
 pub mod settings_panel;
 pub mod template_builder;
+pub mod template_picker;
 pub mod templates;
 pub mod workspace;
 

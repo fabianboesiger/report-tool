@@ -119,16 +119,3 @@ pub fn Group(title: String, #[props(default)] sub: String, children: Element) ->
         }
     }
 }
-
-/// A `details`/`summary` with the marker drawn by CSS.
-///
-/// Where everything that is still configurable but no longer worth showing lives.
-#[component]
-pub fn Disclosure(summary: String, children: Element) -> Element {
-    rsx! {
-        details { class: "adv",
-            summary { "{summary}" }
-            div { {children} }
-        }
-    }
-}

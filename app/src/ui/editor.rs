@@ -13,6 +13,7 @@ use crate::models::{ModelBanner, ModelStatus};
 use crate::ui::kit::{
     Banner, Button, EmptyState, Icon, Notice, NoticeKind, PageBody, PageHead, Pane, Variant,
 };
+use crate::ui::template_picker::TemplatePicker;
 use crate::ui::workspace::{export, SaveState, Workspace};
 
 #[component]
@@ -26,6 +27,10 @@ pub fn EditorScreen(
     on_generate: EventHandler<()>,
 ) -> Element {
     let exported = use_signal(|| None::<String>);
+    // `Some` opens the template picker over this screen. Holds the list as it was when the
+    // button was pressed, for the same reason the reports screen does.
+    let mut choosing = use_signal(|| None::<Vec<report_core::store::Summary>>);
+    let mut picker_error = use_signal(|| None::<String>);
 
     let running = status.read().is_running();
     let has_report = workspace.has_report.read().to_owned();
@@ -42,12 +47,62 @@ pub fn EditorScreen(
         format!("{template_name} · {}", saved.message())
     };
 
+    if let Some(templates) = choosing() {
+        return rsx! {
+            TemplatePicker {
+                templates,
+                title: "Change template".to_string(),
+                subtitle: if has_report {
+                    "This report already has written prose. Changing the template will not \
+                     rewrite it — press Write report again to apply the new structure."
+                        .to_string()
+                } else {
+                    "Which template should this report follow?".to_string()
+                },
+                on_pick: move |template| {
+                    choosing.set(None);
+                    // Autosave subscribes to this signal, so the new snapshot reaches the
+                    // database on its own. Prose already written is deliberately left
+                    // alone; it was produced against the old structure and the next
+                    // generation is what replaces it.
+                    workspace.template.clone().set(template);
+                },
+                on_cancel: move |_| choosing.set(None),
+            }
+        };
+    }
+
     rsx! {
         PageHead {
             title: name,
             subtitle,
             on_title: move |text: String| workspace.report_name.clone().set(text),
             actions: rsx! {
+                Button {
+                    // Names the current template rather than saying "Change template": the
+                    // subtitle carries it too, but the decision this button changes is the
+                    // one thing about a report that cannot be inferred from its notes.
+                    label: if template_name.is_empty() {
+                        "Pick a template".to_string()
+                    } else {
+                        format!("Template: {template_name}")
+                    },
+                    icon: Icon::Layout,
+                    variant: Variant::Quiet,
+                    onclick: move |_| match report_core::store::list_templates() {
+                        Ok(saved) if !saved.is_empty() => {
+                            picker_error.set(None);
+                            choosing.set(Some(saved));
+                        }
+                        // Nothing saved to switch to. Said out loud, because a button that
+                        // does nothing when pressed reads as broken.
+                        Ok(_) => picker_error.set(Some(
+                            "No templates saved yet — make one on the Templates screen."
+                                .to_string(),
+                        )),
+                        Err(problem) => picker_error.set(Some(format!("{problem:#}"))),
+                    },
+                }
                 Button {
                     label: "Export".to_string(),
                     icon: Icon::Download,
@@ -67,6 +122,12 @@ pub fn EditorScreen(
         }
 
         ModelBanner { statuses: downloads }
+
+        if let Some(problem) = picker_error() {
+            Banner { warn: true,
+                span { "{problem}" }
+            }
+        }
 
         if let Some(error) = status.read().message() {
             Banner { warn: true,

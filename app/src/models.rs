@@ -107,6 +107,19 @@ fn initial_stage(spec: &ModelSpec, settings: &report_core::Settings) -> Stage {
     if configured {
         Stage::Configured
     } else if spec.is_present() {
+        // A finished model is never handed to the downloader, so this is the only place
+        // that ever looks beside it. An interrupted attempt can leave a `.part` the size
+        // of the model itself, and without this nothing would ever reclaim it.
+        if let Ok(path) = spec.path() {
+            let reclaimed = report_core::download::discard_partial(&path);
+            if reclaimed > 0 {
+                tracing::info!(
+                    "models: reclaimed {} from an abandoned {} download",
+                    report_core::download::human_bytes(reclaimed),
+                    spec.name
+                );
+            }
+        }
         Stage::Ready
     } else {
         Stage::Waiting
