@@ -1,0 +1,496 @@
+name: Release
+
+# Builds installers for all three platforms, and publishes them when the workspace
+# version is one that has not been released before.
+#
+# ## The shape, and where it differs from the project this was modelled on
+#
+# `Documents/anystory`'s pipeline creates the GitHub release *first* and then uploads each
+# artifact to it as the matrix jobs finish. Its own header notes the consequence: nothing
+# gates a release, so "a push that compiles only on the maintainer's machine can be
+# published". Two changes here, both because the failure mode is worse than the saving:
+#
+#  1. **Build first, publish last.** A release is created only once all three artifacts
+#     exist. Creating it up front means a Windows failure — the one that actually happened
+#     over there — leaves a published, permanent, half-empty release behind.
+#  2. **`verify` gates everything.** Three or four minutes of fmt, clippy and tests before
+#     an hour of compiling C++. It is also the only thing standing between a typo and a
+#     tagged release.
+#
+# Installers are uploaded as workflow artifacts on *every* run, whether or not a release
+# happens, so `workflow_dispatch` on a branch is a usable "give me installers" button.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Pinned to the resolved `dioxus` version in Cargo.lock. `dx` refuses to build a project
+  # whose dioxus version it does not match, so this is not cosmetic — bump both together.
+  DX_VERSION: v0.7.10
+
+# Needed by the release job for the tag push and `gh release create`. Declared at the top
+# level and not per-job because the default token would otherwise be read-only.
+permissions:
+  contents: write
+
+jobs:
+  # ── The gate ───────────────────────────────────────────────────────────────────────
+  #
+  # Deliberately the same commands as `test.yml`'s fast job rather than a `workflow_run`
+  # dependency on it: a release must be blocked by *this* run's state, and chaining
+  # workflows makes that ordering implicit and easy to get wrong.
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      # Needed even for the stub build: Dioxus desktop links webkit2gtk and gtk, and cpal
+      # links ALSA for the dictation microphone.
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libglib2.0-dev libgtk-3-dev \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libxdo-dev \
+            libasound2-dev
+
+      - run: cargo fmt --all -- --check
+      # Both feature configurations, because they break independently: the stub build has
+      # twice regressed on its own when a pure-Rust module was moved behind a feature gate.
+      - run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings
+      - run: cargo test --workspace --no-default-features --verbose
+
+  # ── What version are we on, and is it new? ─────────────────────────────────────────
+  version:
+    name: Read version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+      should_release: ${{ steps.read.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the workspace version and check for an existing release
+        id: read
+        run: |
+          # Scoped to the [workspace.package] section rather than the first `^version` in
+          # the file: the root Cargo.toml also carries [workspace.dependencies], and a
+          # pinned dependency version there would otherwise be picked up and tagged.
+          VERSION=$(sed -n '/^\[workspace\.package\]/,/^\[/p' Cargo.toml \
+                    | sed -n 's/^version *= *"\(.*\)"/\1/p' | head -1)
+
+          # Fail loudly. Without this a parse failure tags the repository `v` and creates a
+          # release nobody can interpret or easily delete.
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "could not read a version from [workspace.package] in Cargo.toml" >&2
+            echo "got: '$VERSION'" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "workspace version: $VERSION"
+
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION is already released — this run will build but not publish"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "v$VERSION is not released yet — this run will publish if the builds pass"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── The installers ─────────────────────────────────────────────────────────────────
+  build:
+    name: Build ${{ matrix.target }}
+    needs: [verify, version]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing must not cancel the others: these jobs take tens of minutes,
+      # and losing a nearly-finished Linux build to an early Windows failure wastes the
+      # whole run and tells you less.
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            package_types: macos
+            artifact: report-tool-macos-aarch64.dmg
+            # Metal comes from the target-specific dependency in app/Cargo.toml, so no
+            # feature flag belongs here.
+            features: ""
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            package_types: deb
+            artifact: report-tool-linux-x86_64.deb
+            features: "vulkan"
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            package_types: nsis
+            artifact: report-tool-windows-x86_64-setup.exe
+            features: "vulkan"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      # ── Windows: three environment fixes, all for the same root cause ──────────────
+      #
+      # We compile two crates that each vendor their own copy of ggml — `llama-cpp-sys-2`
+      # and `whisper-rs-sys` — and with Vulkan each one generates thousands of SPIR-V
+      # objects through nested CMake projects. That combination is what makes Windows the
+      # only awkward platform here. All three steps below are carried over from the
+      # anystory pipeline, where they were each diagnosed the hard way.
+
+      # `C:` on the hosted image is ~79% full before the job starts; `D:` is nearly empty.
+      # A Vulkan `desktop-release` tree does not reliably fit in what `C:` has left, and
+      # cargo then dies with ENOSPC. Everything downstream reads `$TARGET_DIR` rather than
+      # a literal `target`, because dx derives its bundle output path from cargo's.
+      - name: Choose a target directory with room for the build
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            # Forward slashes, not `D:\b`. Later steps pass this to `find` and `cp`, which
+            # under Git Bash are MSYS binaries that do not accept a backslash-separated
+            # Windows path — while cargo, CMake and MSYS all accept `D:/b` happily. A
+            # backslash here fails much later, in a `find` that quietly matches nothing.
+            if [ -d /d ]; then
+              TARGET_DIR='D:/b'
+            else
+              # If the image ever stops shipping a D: drive, say so here rather than
+              # failing later with ENOSPC halfway through compiling ggml.
+              echo "::warning::no D: drive; building on C:, which may run out of space"
+              TARGET_DIR="$(pwd)/target"
+            fi
+          else
+            TARGET_DIR="$(pwd)/target"
+          fi
+          echo "TARGET_DIR=$TARGET_DIR" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$TARGET_DIR" >> "$GITHUB_ENV"
+          echo "target directory: $TARGET_DIR"
+
+      # Neither `-sys` crate forces a CMake generator, so both would get CMake's default
+      # Visual Studio generator — which drags MSBuild, `.vcxproj` files and per-config
+      # subdirectories into paths that are already near the limit. The `cmake` crate honours
+      # this variable, so setting it once covers every CMake crate in the graph.
+      - name: Build CMake projects with Ninja
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
+
+      # The MAX_PATH fix, and the one that cannot be achieved by shortening names. Cargo's
+      # own prefix
+      #
+      #   D:\b\x86_64-pc-windows-msvc\desktop-release\build\llama-cpp-sys-2-<hash>\out\build\
+      #
+      # is already ~95 characters, and ggml's Vulkan backend then builds its shader
+      # generator as a *nested* CMake ExternalProject whose compiler check adds ~145 more.
+      # `cl.exe` has no long-path manifest, so it is hard-capped at 260 and dies with
+      #
+      #   fatal error C1083: Cannot open compiler generated file: '': Invalid argument
+      #
+      # which CMake reports as a broken C++ compiler and the build script turns into a
+      # panic. No amount of shaving TARGET_DIR closes a 150-character gap.
+      #
+      # `EP_BASE` is ExternalProject's own escape hatch: a directory property that moves
+      # the tmp/Stamp/Build trees elsewhere, leaving only the installed
+      # `vulkan-shaders-gen.exe` in the deep tree where the outer build already looks.
+      # It has to be injected from outside, because both engines are unmodified crates.io
+      # dependencies and the `cmake` crate offers no way to pass `-D` flags from the
+      # environment — a toolchain file is the one hook that exists, and cmake-rs forwards
+      # `$CMAKE_TOOLCHAIN_FILE` to `-DCMAKE_TOOLCHAIN_FILE`.
+      #
+      # The hash off `CMAKE_BINARY_DIR` matters for us specifically: `llama-cpp-sys-2` and
+      # `whisper-rs-sys` both vendor ggml and build in parallel, so a shared
+      # `Build\vulkan-shaders-gen` would have them writing over each other.
+      - name: Keep nested ExternalProject builds out of the deep path
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cat > /d/ep.cmake <<'EOF'
+          # Injected by .github/workflows/release.yml as CMAKE_TOOLCHAIN_FILE.
+          # Relocates ExternalProject build trees off cargo's deep target path so cl.exe
+          # stays under its 260-character limit. See the workflow for the full reasoning.
+          string(MD5 _ep_hash "${CMAKE_BINARY_DIR}")
+          string(SUBSTRING "${_ep_hash}" 0 8 _ep_hash)
+          set_property(DIRECTORY PROPERTY EP_BASE "D:/e/${_ep_hash}")
+          set(CMAKE_PROJECT_INCLUDE "D:/ep.cmake")
+          EOF
+          cat /d/ep.cmake
+          echo "CMAKE_TOOLCHAIN_FILE=D:/ep.cmake" >> "$GITHUB_ENV"
+
+      # Required because of CMAKE_GENERATOR above. `cl.exe` needs no help: the `cmake`
+      # crate copies the `cc` crate's MSVC environment onto the CMake child process.
+      #
+      # Do NOT add `ilammy/msvc-dev-cmd` here. Exporting vcvars process-wide makes rustc
+      # trust PATH for the linker instead of doing its own MSVC discovery — and since these
+      # steps run under Git Bash, which prepends `C:\Program Files\Git\usr\bin`, bare
+      # `link.exe` then resolves to GNU coreutils `link` and every native link fails with
+      # "extra operand".
+      - name: Install Ninja
+        if: runner.os == 'Windows'
+        uses: seanmiddleditch/gha-setup-ninja@master
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          # libclang-dev: both -sys crates run bindgen over the C headers. The image ships
+          # Clang, but naming the dev package makes discovery deterministic rather than
+          # dependent on which llvm-*/lib the runner happens to have.
+          # libasound2-dev: cpal, for the dictation microphone.
+          sudo apt-get install -y cmake pkg-config libclang-dev libglib2.0-dev \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libxdo-dev \
+            libasound2-dev
+
+      # ggml compiles its Vulkan compute shaders with `glslc`, which comes from the SDK —
+      # so this is a BUILD requirement even though at runtime the app needs only the loader
+      # that ships with the user's GPU driver (declared in Dioxus.toml's [bundle.deb]).
+      - name: Install the Vulkan SDK
+        if: matrix.features == 'vulkan'
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          install_runtime: true
+          cache: true
+          stripdown: true
+
+      # Verified against the checksum the release publishes, rather than piped straight
+      # from curl into a shell path. It is a binary fetched over the network that then
+      # builds and packages everything we ship.
+      - name: Install the Dioxus CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/DioxusLabs/dioxus/releases/download/${DX_VERSION}"
+          case "$RUNNER_OS" in
+            Linux)   ASSET=dx-x86_64-unknown-linux-gnu.tar.gz ;;
+            macOS)   ASSET=dx-aarch64-apple-darwin.tar.gz ;;
+            Windows) ASSET=dx-x86_64-pc-windows-msvc.zip ;;
+            *) echo "unsupported runner: $RUNNER_OS" >&2; exit 1 ;;
+          esac
+
+          curl -fL "$BASE/$ASSET" -o "$ASSET"
+
+          # One `.sha256` per *target*, named without an archive suffix. Its shape is not
+          # consistent upstream, and both variants have to be handled — checked against
+          # v0.7.10 rather than guessed:
+          #
+          #   linux/macos: two lines, `<digest>  dx-<target>.tar.gz` and the `.zip`
+          #   windows:     one line,  `<digest> *dx-<target>.zip`
+          #
+          # So: select by filename because the unix files list two archives, and strip the
+          # leading `*` (sha256sum's binary-mode marker) because the Windows one has it.
+          # Taking the first line instead would verify the tarball's digest against the zip
+          # on unix; matching `$2` literally finds nothing at all on Windows.
+          SHA_ASSET="${ASSET%.tar.gz}"
+          SHA_ASSET="${SHA_ASSET%.zip}.sha256"
+          curl -fL "$BASE/$SHA_ASSET" -o expected.sha256
+
+          EXPECTED=$(tr -d '\r' < expected.sha256 \
+            | awk -v f="$ASSET" '{ n = $2; sub(/^\*/, "", n); if (n == f) print $1 }')
+          if command -v sha256sum >/dev/null; then
+            ACTUAL=$(sha256sum "$ASSET" | awk '{print $1}')
+          else
+            ACTUAL=$(shasum -a 256 "$ASSET" | awk '{print $1}')
+          fi
+          if [ -z "$EXPECTED" ]; then
+            echo "no digest for $ASSET in $SHA_ASSET:" >&2
+            cat expected.sha256 >&2
+            exit 1
+          fi
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "checksum mismatch for $ASSET" >&2
+            echo "  expected $EXPECTED" >&2
+            echo "  actual   $ACTUAL" >&2
+            exit 1
+          fi
+          echo "$ASSET verified: $ACTUAL"
+
+          # `$GITHUB_PATH` only affects *later* steps, which is why the version check is a
+          # step of its own below rather than a line here.
+          # `/d/tools` and `D:\tools` are the same directory said in the two dialects this
+          # step has to satisfy at once: `mv` is an MSYS binary and wants the POSIX form,
+          # while $GITHUB_PATH is consumed by the runner and wants the native one.
+          case "$RUNNER_OS" in
+            Windows) unzip -o "$ASSET"
+                     mkdir -p /d/tools
+                     mv dx.exe /d/tools/dx.exe
+                     echo 'D:\tools' >> "$GITHUB_PATH" ;;
+            *)       tar xzf "$ASSET"
+                     sudo mv dx /usr/local/bin/ ;;
+          esac
+
+      - name: Check the Dioxus CLI runs
+        shell: bash
+        run: dx --version
+
+      # Deliberately after the CARGO_TARGET_DIR step: rust-cache reads that variable to
+      # find the tree it caches. On macOS and Linux the value is the default `./target`, so
+      # their cache keys match `test.yml`'s and the two workflows share warm caches.
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Distinct per platform-and-backend: the CMake output lives in `target/` and is
+          # not interchangeable between Metal and Vulkan.
+          key: bundle-${{ matrix.features }}
+
+      - name: Bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Strip local build paths from the binary. `strip` in [profile.release] removes
+          # DWARF paths; this remaps the path literals rustc bakes into rodata for panic
+          # locations, which would otherwise ship a runner's directory layout. `$HOME` is
+          # expanded here in bash rather than in a YAML `env:` block, which would not
+          # expand it.
+          export RUSTFLAGS="--remap-path-prefix=$HOME=/build --remap-path-prefix=$(pwd)=/src ${RUSTFLAGS:-}"
+
+          FEATURES=""
+          if [ -n "${{ matrix.features }}" ]; then
+            FEATURES="--features ${{ matrix.features }}"
+          fi
+
+          # `dx bundle`, not `dx build`: it does the platform packaging and embeds the icon
+          # set from `[bundle] icon` in app/Dioxus.toml.
+          #
+          # `--package report-tool` because this is a workspace and dx has to be told which
+          # binary crate to bundle. Real inference is the app's default feature, so no flag
+          # turns it on; `--verbose` because dx otherwise swallows cargo's stderr and
+          # reports a bare "cargo build finished with errors".
+          #
+          # ggml links statically, so there is nothing extra to ship. The only dynamic
+          # dependency is the Vulkan loader. If a Windows machine ever turns out to lack
+          # `vulkan-1.dll` entirely, the fix is `--features vulkan,runtime-backends`, which
+          # loads each backend as an optional module and falls back to CPU rather than
+          # failing to start — see `report_core::gpu` and `app/build.rs`.
+          dx bundle --verbose --package report-tool --release --platform desktop \
+            --package-types ${{ matrix.package_types }} $FEATURES
+
+      # Located rather than hardcoded: dx composes this path from the package name, and a
+      # layout change upstream should fail here with a clear message instead of making a
+      # later `cp` silently copy nothing.
+      - name: Locate the bundle output
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE=$(find "$TARGET_DIR/dx" -type d -name bundle -print -quit)
+          if [ -z "$BUNDLE" ]; then
+            echo "no bundle directory under $TARGET_DIR/dx — did dx change its layout?" >&2
+            find "$TARGET_DIR/dx" -maxdepth 3 -type d >&2 || true
+            exit 1
+          fi
+          echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
+          find "$BUNDLE" -maxdepth 2
+
+      # Ad-hoc, which is not notarisation: it stops Gatekeeper reporting the app as
+      # "damaged", but a first launch still needs right-click → Open. Real signing needs a
+      # paid Developer ID in secrets, which this repository does not have.
+      - name: Sign the macOS app (ad-hoc)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP=$(find "$BUNDLE" -ipath '*macos*' -name '*.app' -print -quit)
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --verbose "$APP"
+
+      - name: Prepare the artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          case "$RUNNER_OS" in
+            macOS)
+              # A drag-to-Applications .dmg, built by hand because dx's `macos` package
+              # type produces a bare .app.
+              APP=$(find "$BUNDLE" -ipath '*macos*' -name '*.app' -print -quit)
+              STAGING=$(mktemp -d)
+              cp -R "$APP" "$STAGING/"
+              ln -s /Applications "$STAGING/Applications"
+              # `-size` is not optional. Left to estimate, hdiutil leaves only a few MB of
+              # slack, and the ad-hoc signature, xattrs and HFS+ metadata can exceed it —
+              # the copy then fails *inside* the mounted image with "No space left on
+              # device", which reads like a full runner disk and is not. UDZO compresses
+              # the unused space away, so the slack costs nothing in the published file.
+              SIZE_MB=$(( $(du -sm "$STAGING" | cut -f1) + 300 ))
+              echo "staging $(du -sh "$STAGING" | cut -f1) -> image ${SIZE_MB}m"
+              hdiutil create -volname "Report tool" -srcfolder "$STAGING" -ov \
+                -format UDZO -fs HFS+ -size "${SIZE_MB}m" \
+                "release-artifacts/${{ matrix.artifact }}"
+              ;;
+            Linux)
+              cp "$(find "$BUNDLE" -ipath '*deb*' -name '*.deb' -print -quit)" \
+                 "release-artifacts/${{ matrix.artifact }}"
+              ;;
+            Windows)
+              cp "$(find "$BUNDLE" -ipath '*nsis*' -name '*.exe' -print -quit)" \
+                 "release-artifacts/${{ matrix.artifact }}"
+              ;;
+          esac
+          ls -lh release-artifacts/
+
+      # Every run, released or not: this is what makes a `workflow_dispatch` on a branch
+      # useful, and what lets a failed release be diagnosed from the actual installer.
+      - name: Upload the installer as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release-artifacts/${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 30
+
+  # ── Publish, only once all three installers exist ──────────────────────────────────
+  publish:
+    name: Publish v${{ needs.version.outputs.version }}
+    needs: [version, build]
+    if: needs.version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The tag is created from this checkout, and `--generate-notes` compares against
+          # earlier tags, so the history has to be here.
+          fetch-depth: 0
+
+      - name: Download every installer
+        uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+
+      - name: Tag and release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          ls -lh installers/
+
+          # Three, or the release is incomplete. `fail-fast: false` means a single platform
+          # can fail while the others succeed, and `needs: build` alone would not catch
+          # that — this is the check that stops a two-platform release being published as
+          # though it were whole.
+          COUNT=$(find installers -type f | wc -l | tr -d ' ')
+          if [ "$COUNT" -ne 3 ]; then
+            echo "expected 3 installers, found $COUNT — refusing to publish a partial release" >&2
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+
+          # Plain `--generate-notes`: it finds the previous tag itself, and passing an
+          # empty `--notes-start-tag` is an error — which is precisely the state this
+          # repository is in for its first release.
+          gh release create "v$VERSION" \
+            --title "Report tool v$VERSION" \
+            --generate-notes \
+            installers/*

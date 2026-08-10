@@ -42,4 +42,8 @@ icon = [
 #
 # Windows needs no equivalent: `vulkan-1.dll` is installed by every GPU driver.
 [bundle.deb]
-depends = ["libvulkan1"]
+# libasound2: cpal opens the microphone through ALSA and links it dynamically, so the
+# package must declare it or the app dies in `ld.so` before `main` on a machine without
+# it. On Ubuntu 24.04 and later the real package is `libasound2t64`, which Provides
+# `libasound2`, so naming the old one still resolves on both.
+depends = ["libvulkan1", "libasound2"]

@@ -35,7 +35,10 @@ jobs:
             libasound2-dev
 
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --no-default-features -- -D warnings
+      # `--all-targets`, so tests and examples are linted too. Without it CI was weaker
+      # than a local `cargo clippy --all-targets`, which is where three real warnings were
+      # found — a lint that only fires on a test target is still a lint.
+      - run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings
 
       # The UI-free crates carry the tests worth running on every push.
       - run: cargo test -p report-doc -p report-core --verbose
@@ -94,6 +97,20 @@ jobs:
             cargo build -p report-tool --features "${{ matrix.features }}" --verbose
           else
             cargo build -p report-tool --verbose
+          fi
+
+      # The only place inference-gated code gets linted: every other job in either
+      # workflow is a stub build, and `dx bundle` runs cargo without clippy. Cheap here
+      # because this job has already compiled the dependency graph.
+      - name: Lint with inference compiled in
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.features }}" ]; then
+            cargo clippy -p report-core --all-targets \
+              --features "inference,remote,${{ matrix.features }}" -- -D warnings
+          else
+            cargo clippy -p report-core --all-targets \
+              --features inference,remote -- -D warnings
           fi
 
       # Runs the engines far enough to prove they linked and initialise. Actual

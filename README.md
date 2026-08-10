@@ -168,6 +168,32 @@ cargo run -p report-core --example llm_smoke --features inference,metal -- model
 `REPORT_GBNF` overrides the emitted grammar in that example, for isolating which
 construct a given llama.cpp build rejects.
 
+## Releases
+
+Two workflows in `.github/workflows/`:
+
+| | Trigger | Does |
+|---|---|---|
+| `test.yml` | push, PR, dispatch | fmt, clippy, the stub build and tests; then compiles each GPU backend on the platform that ships it |
+| `release.yml` | push to `main`, dispatch | verifies, builds an installer per platform, and publishes when the version is new |
+
+**To cut a release**, bump `version` under `[workspace.package]` in the root `Cargo.toml`
+and push to `main`. The pipeline tags `v<version>`, builds all three installers and
+attaches them. A push whose version is already released still builds — it just does not
+publish, so the installers arrive as workflow artifacts instead. `workflow_dispatch` on any
+branch is therefore a usable "give me installers" button.
+
+Artifacts: `.dmg` for macOS on Apple silicon, `.deb` for x86-64 Linux, and an NSIS
+`setup.exe` for x86-64 Windows. Windows and Linux carry the Vulkan backend, which covers
+NVIDIA, AMD, Intel and integrated GPUs from one file; macOS gets Metal automatically.
+
+The macOS app is **ad-hoc signed, not notarised** — enough to stop Gatekeeper calling it
+damaged, but a first launch still needs right-click → Open. Real signing needs a paid
+Developer ID in repository secrets.
+
+Bumping `dioxus` means bumping `DX_VERSION` in `release.yml` in the same commit: `dx`
+refuses to build a project whose dioxus version it does not match.
+
 ## Third-party
 
 The icon set in `app/src/ui/kit/icon.rs` is vendored from [Lucide](https://lucide.dev)
