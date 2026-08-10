@@ -1,0 +1,67 @@
+[workspace]
+resolver = "2"
+members = ["crates/doc", "crates/editor", "crates/core", "app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+report-doc = { path = "crates/doc" }
+report-editor = { path = "crates/editor" }
+report-core = { path = "crates/core" }
+
+anyhow = "1"
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+# `preserve_order` keeps JSON object keys in insertion order rather than sorting
+# them. Two reasons: templates and reports are stored as plain files precisely so
+# they stay inspectable and diffable, and re-sorting every key on save would churn
+# those diffs; and the emitted GBNF fixes key order (a constrained model can only
+# produce that order), so tests that check the grammar against a sample value need
+# the sample to serialize the same way a model would write it.
+serde_json = { version = "1", features = ["preserve_order"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+directories = "6"
+dioxus = { version = "0.7", features = ["desktop"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# --- Local inference: llama.cpp + whisper.cpp -------------------------------
+#
+# Both are ggml-based. They run in SEPARATE worker processes, never together —
+# each vendors its own copy of ggml, and the two copies disagree on
+# `sizeof(ggml_tensor)`. See `app/src/worker.rs` for the full reasoning.
+#
+# Pinned exactly: llama-cpp-2 explicitly disclaims semver, so a caret range would
+# let a breaking change in on a routine `cargo update`. whisper-rs is pinned for
+# the same reason — it tracks whisper.cpp closely.
+llama-cpp-2 = "=0.1.154"
+# `tracing_backend`: whisper.cpp and ggml write straight to stderr otherwise, and a
+# worker's stderr is inherited by the parent — where `dx serve` labels every line of
+# it ERROR. See `worker::quiet_engine_logs`.
+whisper-rs = { version = "=0.16.0", features = ["tracing_backend"] }
+# Stateful UTF-8 decoder for streaming detokenization: a single token is not
+# necessarily a whole character, so partial sequences must be held back across
+# calls. This is llama-cpp-2's own decoder type, re-exported through its API.
+encoding_rs = "0.8"
+
+# Keep the shipped binary free of local build paths. `strip` drops the symbol table
+# and DWARF debug info (which embeds absolute source paths). Panic-location literals
+# are additionally scrubbed by the `--remap-path-prefix` flags in `.cargo/config.toml`.
+# (`trim-paths` would do all of this in one line, but it is still unstable in Cargo.)
+[profile.release]
+strip = "symbols"
+
+# `dx bundle --release` does not build under `release`; it builds under its own
+# `desktop-release` profile, so nothing from a plain `cargo build --release` is reused.
+# Declaring the profile here (rather than letting dx inject it via `--config`) means
+# plain cargo can drive the exact same build — which is how you get a real error
+# message out of it: dx forwards rustc's JSON diagnostics but drops cargo's stderr,
+# so a failing build script otherwise shows up as nothing but "cargo build finished
+# with errors".
+[profile.desktop-release]
+inherits = "release"

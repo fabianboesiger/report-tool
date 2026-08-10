@@ -1,0 +1,15 @@
+[package]
+name = "report-doc"
+version.workspace = true
+edition.workspace = true
+
+# The shared document vocabulary: `RichDoc` and the conversions around it.
+#
+# Deliberately dependency-light and UI-free. Both `report-editor` (which needs the
+# model to render) and `report-core` (which needs it to render generated reports
+# into) sit above this, so neither has to depend on the other — and in particular
+# `report-core` never links Dioxus.
+[dependencies]
+serde = { workspace = true }
+pulldown-cmark = { workspace = true }
+uuid = { workspace = true }

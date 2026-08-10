@@ -1,0 +1,15 @@
+# Strip local build paths (home dir / username) from the rodata panic-location
+# literals rustc bakes into binaries, so a locally-built `dx bundle` never leaks
+# `/Users/<name>/...`.
+#
+# `trim-paths` in [profile.release] would be the portable, machine-agnostic way to
+# do this, but it is not yet stabilized in Cargo 1.95, so we remap explicitly.
+# Home first, then the workspace (more specific, wins).
+#
+# Note: an inherited RUSTFLAGS env var overrides (does not merge with) this, so a
+# CI job setting its own remap still takes precedence there.
+[build]
+rustflags = [
+    "--remap-path-prefix=/Users/fboesiger=/build",
+    "--remap-path-prefix=/Users/fboesiger/report-tool=/src",
+]

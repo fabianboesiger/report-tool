@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Report tool — Field</title>
+<style>
+  /* ─── Field ───────────────────────────────────────────────────────────────
+     Voice first, for someone standing on a roof with one free hand. Large
+     targets, few controls, high contrast. Typing is the fallback, not the
+     default. Dark by default because the screen is usually outdoors or in a
+     stairwell; light theme is a tap away.
+     ------------------------------------------------------------------- */
+  :root{
+    --bg:#ffffff; --raise:#f6f7f8; --line:#e5e7eb; --line-2:#d1d5db;
+    --ink:#0c0d0f; --text:#33363d; --muted:#6f747e; --faint:#a0a5ae;
+    --accent:#1a56db; --on-accent:#fff; --rec:#c62b2b;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+    --serif:"Iowan Old Style",Charter,Georgia,serif;
+  }
+  html[data-theme="dark"]{
+    --bg:#0c0d10; --raise:#161820; --line:#22252e; --line-2:#333846;
+    --ink:#f6f7fa; --text:#c8ccd6; --muted:#8b909d; --faint:#5c6270;
+    --accent:#6f9bff; --on-accent:#08111f; --rec:#ff5f56;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:16px;-webkit-font-smoothing:antialiased}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  input{font:inherit;color:inherit}
+
+  .app{height:100vh;display:flex;flex-direction:column;max-width:760px;margin:0 auto;
+       border-left:1px solid var(--line);border-right:1px solid var(--line)}
+
+  /* ── bar ── */
+  .bar{display:flex;align-items:center;gap:10px;padding:14px 20px;border-bottom:1px solid var(--line)}
+  .ib{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;color:var(--muted)}
+  .ib:hover{background:var(--raise);color:var(--ink)}
+  .ib svg{width:20px;height:20px}
+  .bar .who{flex:1;min-width:0}
+  .bar .who b{display:block;font-size:15.5px;color:var(--ink);font-weight:600;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bar .who span{font-size:13px;color:var(--muted)}
+
+  .stage{flex:1;min-height:0;overflow-y:auto}
+  .pad{padding:26px 22px 40px}
+
+  /* ── capture ── */
+  .capture{display:flex;flex-direction:column;align-items:center;padding:34px 22px 20px;gap:16px}
+  .miclabel{font-size:14px;color:var(--muted);text-align:center;max-width:36ch;line-height:1.55}
+  .bigmic{width:104px;height:104px;border-radius:50%;background:var(--accent);color:var(--on-accent);
+          display:grid;place-items:center;box-shadow:0 8px 28px -10px color-mix(in srgb,var(--accent) 70%,transparent);
+          transition:transform .12s}
+  .bigmic:active{transform:scale(.96)}
+  .bigmic svg{width:40px;height:40px}
+  .bigmic.live{background:var(--rec);box-shadow:0 0 0 0 color-mix(in srgb,var(--rec) 55%,transparent);animation:halo 1.6s infinite}
+  @keyframes halo{70%{box-shadow:0 0 0 24px transparent}100%{box-shadow:0 0 0 0 transparent}}
+  .levels{display:flex;gap:4px;align-items:center;height:26px}
+  .levels i{width:4px;border-radius:2px;background:var(--rec);animation:lv 1s ease-in-out infinite}
+  .levels i:nth-child(1){height:8px;animation-delay:0s}.levels i:nth-child(2){height:18px;animation-delay:.08s}
+  .levels i:nth-child(3){height:26px;animation-delay:.16s}.levels i:nth-child(4){height:14px;animation-delay:.24s}
+  .levels i:nth-child(5){height:22px;animation-delay:.32s}.levels i:nth-child(6){height:10px;animation-delay:.4s}
+  .levels i:nth-child(7){height:17px;animation-delay:.48s}
+  @keyframes lv{50%{transform:scaleY(.3)}}
+  .timer{font-size:14px;color:var(--rec);font-variant-numeric:tabular-nums}
+
+  /* ── transcript ── */
+  .lines{border-top:1px solid var(--line);margin-top:8px}
+  .line{display:flex;gap:14px;padding:16px 22px;border-bottom:1px solid var(--line)}
+  .line:hover{background:var(--raise)}
+  .line .t{font-size:12.5px;color:var(--faint);width:42px;flex:none;font-variant-numeric:tabular-nums;padding-top:3px}
+  .line .txt{flex:1;font-size:16.5px;line-height:1.6;color:var(--text);outline:0}
+  .line .x{opacity:0;width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--faint);flex:none}
+  .line:hover .x{opacity:1}
+  .line .x:hover{background:var(--bg);color:var(--rec)}
+  .line .x svg{width:15px;height:15px}
+  .line.pending .txt{color:var(--muted);font-style:italic}
+  .typeline{display:flex;gap:12px;align-items:center;padding:16px 22px;border-bottom:1px solid var(--line)}
+  .typeline input{flex:1;background:none;border:0;outline:0;font-size:16.5px}
+  .typeline input::placeholder{color:var(--faint)}
+  .typeline svg{width:19px;height:19px;color:var(--faint)}
+
+  /* ── the one big action ── */
+  .act{flex:none;border-top:1px solid var(--line);background:var(--bg);padding:20px 22px}
+  .huge{width:100%;padding:18px;border-radius:15px;background:var(--ink);color:var(--bg);
+        font-size:17px;font-weight:620;display:flex;align-items:center;justify-content:center;gap:11px;letter-spacing:-.01em}
+  .huge:hover{opacity:.9}
+  .huge svg{width:20px;height:20px}
+  .huge[disabled]{opacity:.4;cursor:default}
+  .act .sub{text-align:center;font-size:13px;color:var(--faint);margin-top:11px}
+
+  /* ── writing ── */
+  .work{display:flex;flex-direction:column;align-items:center;gap:18px;padding:110px 22px;text-align:center}
+  .ring{width:52px;height:52px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--accent);animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .work b{font-size:19px;color:var(--ink);font-weight:620}
+  .work p{margin:0;font-size:14.5px;color:var(--muted);max-width:34ch;line-height:1.6}
+
+  /* ── report ── */
+  .doc{font-family:var(--serif);font-size:17.5px;line-height:1.72;color:var(--text);outline:0}
+  .doc h1{font-family:var(--sans);font-size:26px;font-weight:650;color:var(--ink);letter-spacing:-.02em;margin:0 0 4px;line-height:1.2}
+  .doc .stamp{font-family:var(--sans);font-size:13px;color:var(--faint);margin:0 0 30px}
+  .doc h2{font-family:var(--sans);font-size:18px;font-weight:640;color:var(--ink);margin:32px 0 10px}
+  .doc h3{font-family:var(--sans);font-size:15px;font-weight:620;color:var(--text);margin:24px 0 8px}
+  .doc p{margin:0 0 16px}
+  .doc ul,.doc ol{margin:0 0 16px;padding-left:25px}
+  .doc li{margin:0 0 8px}
+  .foot{display:flex;gap:10px;padding:16px 22px;border-top:1px solid var(--line);background:var(--bg);position:sticky;bottom:0}
+  .foot button{flex:1;padding:14px;border-radius:12px;font-size:15px;font-weight:580;border:1px solid var(--line-2);color:var(--text);display:flex;align-items:center;justify-content:center;gap:9px}
+  .foot button:hover{border-color:var(--muted)}
+  .foot button.main{background:var(--accent);border-color:var(--accent);color:var(--on-accent);flex:1.4}
+  .foot svg{width:17px;height:17px}
+
+  /* ── sheets ── */
+  .sheet{position:fixed;inset:0;z-index:20;background:color-mix(in srgb,#000 46%,transparent);display:flex;align-items:flex-end;justify-content:center}
+  .sheet-in{width:min(760px,100%);max-height:88vh;overflow-y:auto;background:var(--bg);border-radius:22px 22px 0 0;border:1px solid var(--line);border-bottom:0}
+  .sheet-bar{display:flex;align-items:center;gap:12px;padding:18px 22px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:1}
+  .sheet-bar h2{margin:0;font-size:18px;color:var(--ink);font-weight:640;letter-spacing:-.015em;flex:1}
+  .pick{display:flex;align-items:center;gap:16px;padding:20px 22px;border-bottom:1px solid var(--line);width:100%;text-align:left}
+  .pick:hover{background:var(--raise)}
+  .pick .ic{width:44px;height:44px;border-radius:12px;background:var(--raise);color:var(--accent);display:grid;place-items:center;flex:none}
+  .pick .ic svg{width:21px;height:21px}
+  .pick b{display:block;font-size:16.5px;color:var(--ink);font-weight:600;margin-bottom:3px}
+  .pick span{font-size:14px;color:var(--muted);line-height:1.5}
+  .pick .chev{color:var(--faint)}
+  .pick .chev svg{width:18px;height:18px}
+  .pick.on .ic{background:var(--accent);color:var(--on-accent)}
+
+  .grp{padding:22px}
+  .grp h3{margin:0 0 4px;font-size:15px;color:var(--ink);font-weight:620}
+  .grp .d{margin:0 0 16px;font-size:14px;color:var(--muted);line-height:1.55}
+  .opt{display:flex;gap:14px;align-items:flex-start;padding:16px;border:1px solid var(--line);border-radius:13px;margin-bottom:9px;cursor:pointer}
+  .opt.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 9%,transparent)}
+  .opt .r{width:18px;height:18px;border-radius:50%;border:2px solid var(--line-2);flex:none;margin-top:2px;position:relative}
+  .opt.on .r{border-color:var(--accent)}
+  .opt.on .r::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--accent)}
+  .opt b{display:block;font-size:15px;color:var(--ink);margin-bottom:3px}
+  .opt span{font-size:13.5px;color:var(--muted);line-height:1.5}
+  .fld{margin-top:16px}
+  .fld label{display:block;font-size:13.5px;color:var(--muted);margin-bottom:7px}
+  .fld input{width:100%;border:1px solid var(--line-2);border-radius:12px;background:var(--raise);padding:13px 15px;outline:0}
+  .fld input:focus{border-color:var(--accent)}
+  details summary{cursor:pointer;font-size:14px;color:var(--muted);padding:10px 0;list-style:none}
+  details summary::-webkit-details-marker{display:none}
+  details summary::before{content:"▸ ";color:var(--faint)}
+  details[open] summary::before{content:"▾ "}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="bar">
+    <button class="ib" onclick="openSheet('reports')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    <div class="who">
+      <b id="wname">Bahnhofstrasse 14</b>
+      <span id="wsub">Site inspection · notes</span>
+    </div>
+    <button class="ib" onclick="toggleTheme()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    <button class="ib" onclick="openSheet('settings')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg></button>
+  </header>
+
+  <!-- ══ CAPTURE ══ -->
+  <div class="stage" id="capture">
+    <div class="capture">
+      <button class="bigmic" id="mic" onclick="rec()">
+        <svg id="micicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2a3.5 3.5 0 0 0-3.5 3.5v6a3.5 3.5 0 0 0 7 0v-6A3.5 3.5 0 0 0 12 2z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v4"/></svg>
+      </button>
+      <div id="idle">
+        <p class="miclabel">Tap and describe what you see. Fragments, out of order, in German or English — it all gets sorted into the report.</p>
+      </div>
+      <div id="live" hidden style="display:flex;flex-direction:column;align-items:center;gap:10px">
+        <div class="levels"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="timer">0:24 · listening</div>
+      </div>
+    </div>
+
+    <div class="lines">
+      <div class="line"><span class="t">14:31</span><span class="txt" contenteditable>North wall: hairline cracking below the second window, roughly 30 cm long.</span><button class="x"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+      <div class="line"><span class="t">14:33</span><span class="txt" contenteditable>Roof: two slipped tiles above the west gable.</span><button class="x"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+      <div class="line"><span class="t">14:35</span><span class="txt" contenteditable>Tenant mentioned damp after heavy rain, wants a follow-up before winter.</span><button class="x"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+      <div class="typeline">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+        <input placeholder="…or type a note">
+      </div>
+    </div>
+
+  </div>
+  <div class="act" id="captureact">
+    <button class="huge" onclick="write()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>
+      Write the report
+    </button>
+    <p class="sub">3 notes · about 30 seconds, on this device</p>
+  </div>
+
+  <!-- ══ WRITING ══ -->
+  <div class="stage" id="working" hidden>
+    <div class="work">
+      <div class="ring"></div>
+      <b>Writing your report</b>
+      <p>Sorting your notes into the site inspection template. Nothing is being uploaded.</p>
+    </div>
+  </div>
+
+  <!-- ══ REPORT ══ -->
+  <div class="stage" id="report" hidden>
+    <div class="pad">
+      <div class="doc" contenteditable>
+        <h1>Site inspection — Bahnhofstrasse 14</h1>
+        <p class="stamp">10 August 2026 · F. Bösiger</p>
+        <p>The building was inspected on 10 August following the tenant's report of damp after heavy rain. Two defects were recorded, both on the exposed north and west elevations. Neither is structurally urgent, but both should be dealt with before the winter.</p>
+        <h2>Findings</h2>
+        <h3>North wall</h3>
+        <p>Hairline cracking runs approximately 30 cm below the second window. The crack is superficial, with no displacement along its length, which is consistent with settlement rather than ongoing movement.</p>
+        <ol><li>Monitor the crack over one further season.</li><li>Fill and repaint once movement has been ruled out.</li></ol>
+        <h3>Roof, west gable</h3>
+        <p>Two tiles above the west gable have slipped, leaving the underlay exposed. This is the most likely path for the water ingress the tenant described.</p>
+        <ol><li>Re-bed the two slipped tiles.</li><li>Inspect the surrounding course for further movement.</li></ol>
+        <h2>Follow-up</h2>
+        <ul><li>Return visit before the first frost.</li><li>Confirm with the tenant that the damp has stopped.</li></ul>
+      </div>
+    </div>
+  </div>
+  <div class="foot" id="reportfoot" hidden>
+    <button onclick="show('capture')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M15 18l-6-6 6-6"/></svg>Notes</button>
+    <button onclick="write()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>Again</button>
+    <button class="main"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></svg>Save &amp; send</button>
+  </div>
+</div>
+
+<!-- ── reports / templates sheet ── -->
+<div class="sheet" id="sheet-reports" hidden onclick="if(event.target===this)closeSheets()">
+  <div class="sheet-in">
+    <div class="sheet-bar">
+      <h2>Reports</h2>
+      <button class="ib" onclick="closeSheets()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </div>
+    <button class="pick on" onclick="closeSheets()">
+      <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 5v14M5 12h14"/></svg></span>
+      <span style="flex:1"><b>New report</b><span>Choose a template and start talking</span></span>
+      <span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></span>
+    </button>
+    <button class="pick" onclick="closeSheets()">
+      <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg></span>
+      <span style="flex:1"><b>Bahnhofstrasse 14</b><span>Site inspection · draft · 2 hours ago</span></span>
+      <span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></span>
+    </button>
+    <button class="pick" onclick="closeSheets()">
+      <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg></span>
+      <span style="flex:1"><b>Seefeldquai 3</b><span>Site inspection · final · yesterday</span></span>
+      <span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></span>
+    </button>
+    <button class="pick" onclick="closeSheets()">
+      <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg></span>
+      <span style="flex:1"><b>Client call — Meier AG</b><span>Meeting note · final · 2 Aug</span></span>
+      <span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></span>
+    </button>
+    <div class="grp">
+      <h3>Templates</h3>
+      <p class="d">The shape each kind of report takes.</p>
+      <button class="opt on" style="width:100%;text-align:left"><span class="r"></span><span><b>Site inspection</b><span>Summary · Findings, once per defect · Follow-up</span></span></button>
+      <button class="opt" style="width:100%;text-align:left"><span class="r"></span><span><b>Meeting note</b><span>Attendees · Decisions · Actions</span></span></button>
+      <button class="opt" style="width:100%;text-align:left"><span class="r"></span><span><b>Handover protocol</b><span>Parties · Condition per room · Readings</span></span></button>
+    </div>
+  </div>
+</div>
+
+<!-- ── settings sheet ── -->
+<div class="sheet" id="sheet-settings" hidden onclick="if(event.target===this)closeSheets()">
+  <div class="sheet-in">
+    <div class="sheet-bar">
+      <h2>Settings</h2>
+      <button class="ib" onclick="closeSheets()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="grp">
+      <h3>Where reports are written</h3>
+      <p class="d">This decides whether your notes ever leave this device.</p>
+      <label class="opt on"><span class="r"></span><span><b>On this device</b><span>Nothing is uploaded. Works with no signal.</span></span></label>
+      <label class="opt"><span class="r"></span><span><b>Company server</b><span>Faster, but needs a connection and sends your notes.</span></span></label>
+      <label class="opt"><span class="r"></span><span><b>Example text</b><span>Placeholder text in the right shape, for practice.</span></span></label>
+      <details>
+        <summary>Server details</summary>
+        <div class="fld"><label>Address</label><input value="https://gateway.ajila.com/v1"></div>
+        <div class="fld"><label>Key</label><input type="password" value="••••••••••••••"></div>
+      </details>
+    </div>
+    <div class="grp" style="border-top:1px solid var(--line)">
+      <h3>Dictation</h3>
+      <p class="d">Speech becomes text on this device. Recordings are never uploaded.</p>
+      <div class="fld"><label>Spoken language</label><input value="Detect automatically"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function show(which){
+    ['capture','working','report'].forEach(id => document.getElementById(id).hidden = id !== which);
+    document.getElementById('captureact').hidden = which !== 'capture';
+    document.getElementById('reportfoot').hidden = which !== 'report';
+    document.getElementById('wsub').textContent =
+      which === 'report' ? 'Site inspection · report' : 'Site inspection · notes';
+  }
+  function write(){
+    show('working');
+    setTimeout(() => show('report'), 1900);
+  }
+  function rec(){
+    const m = document.getElementById('mic');
+    m.classList.toggle('live');
+    const on = m.classList.contains('live');
+    document.getElementById('idle').hidden = on;
+    document.getElementById('live').hidden = !on;
+    document.getElementById('micicon').innerHTML = on
+      ? '<rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none"/>'
+      : '<path d="M12 2a3.5 3.5 0 0 0-3.5 3.5v6a3.5 3.5 0 0 0 7 0v-6A3.5 3.5 0 0 0 12 2z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v4"/>';
+  }
+  function openSheet(n){ document.getElementById('sheet-' + n).hidden = false; }
+  function closeSheets(){ document.querySelectorAll('.sheet').forEach(s => s.hidden = true); }
+  function toggleTheme(){
+    const r = document.documentElement;
+    r.dataset.theme = r.dataset.theme === 'dark' ? 'light' : 'dark';
+  }
+</script>
+</body>
+</html>

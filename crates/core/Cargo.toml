@@ -1,0 +1,78 @@
+[package]
+name = "report-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+report-doc = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+directories = { workspace = true }
+
+# Heavy ML stack, only compiled with the `inference` feature so the template
+# compilers, the renderer and the UI can be built and tested in seconds without
+# pulling in the C++ engines.
+llama-cpp-2 = { workspace = true, optional = true }
+whisper-rs = { workspace = true, optional = true }
+encoding_rs = { version = "0.8", optional = true }
+reqwest = { workspace = true, optional = true }
+
+# Only for `_exit` in the inference worker: both ggml copies register static
+# destructors, and the linker keeps one of each duplicated symbol, so the one that
+# runs at exit may not belong to the engine this process used. See `worker.rs`.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[features]
+default = []
+
+# Turn on real local inference (report generation + dictation). Without this the
+# crate uses deterministic stub backends, which keeps the UI dev loop at seconds
+# rather than minutes. Enabled by default in `app`, since `dx` honours only a
+# package's *default* features — see app/Cargo.toml.
+inference = ["dep:llama-cpp-2", "dep:whisper-rs", "dep:encoding_rs", "worker", "download"]
+
+# Resumable model downloads. Pure Rust, but it needs an HTTP client, so it is its own
+# feature rather than something a stub build pays for.
+download = ["dep:reqwest", "tokio/fs", "tokio/io-util"]
+
+# The parent half of the out-of-process worker: spawning the child and talking to it
+# over its pipes. Separate from `inference` because it is pure Rust and cheap, and
+# because it is what lets a build without an engine still compile the plumbing.
+worker = ["tokio/process", "tokio/io-util"]
+
+# The OpenAI-compatible connector. Separate from `inference`: it is pure Rust and
+# cheap, so a stub build still talks to a real remote model.
+remote = ["dep:reqwest"]
+
+# GPU backends, forwarded to both ggml engines. Pick one per platform; they share
+# the same ggml backend set, so one choice accelerates generation and dictation
+# alike. Metal is wired in automatically on macOS from app/Cargo.toml.
+metal = ["llama-cpp-2?/metal", "whisper-rs?/metal"]
+cuda = ["llama-cpp-2?/cuda", "whisper-rs?/cuda"]
+# The universal backend: NVIDIA + AMD + Intel + integrated, Windows and Linux.
+vulkan = ["llama-cpp-2?/vulkan", "whisper-rs?/vulkan"]
+
+# Build each ggml backend as a separately loadable module and choose at runtime, so
+# ONE installer covers every GPU and falls back to CPU when none is usable.
+#
+# Deliberately NOT implied by the backend features above: it makes the build emit
+# shared libraries that the executable resolves via @rpath/$ORIGIN, so the bundler
+# has to ship them next to the binary and set an rpath. Until that packaging work
+# lands, a plain `cargo build` with this on produces a binary that cannot start.
+# See `crate::gpu`.
+runtime-backends = ["llama-cpp-2?/dynamic-backends"]
+
+# The local-path smoke test needs a real engine to load a model into.
+[[example]]
+name = "llm_smoke"
+required-features = ["inference"]
+
+[[example]]
+name = "download_smoke"
+required-features = ["download"]

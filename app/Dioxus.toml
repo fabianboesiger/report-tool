@@ -1,0 +1,29 @@
+# Dioxus CLI (`dx`) configuration.
+#
+# NOTE ON FEATURES: `dx` has no config key for Cargo features — it honours only
+# `--features` / `--no-default-features` on the command line and the package's
+# Cargo *default* features. Real inference is therefore enabled via
+# `default = ["inference", "remote"]` in Cargo.toml (with Metal auto-enabled on
+# macOS), so `dx build` / `dx serve` always produce a working app rather than a
+# silent stub. For the fast dev loop: `dx serve --no-default-features`.
+
+[application]
+name = "report-tool"
+
+[bundle]
+# Keep this in sync with the ProjectDirs qualifier/org/app in
+# crates/core/src/paths.rs ("ch", "ajila", "report-tool"), so a bundled build and a
+# `dx serve` build agree on where the user's templates and reports live.
+identifier = "ch.ajila.report-tool"
+publisher = "Ajila"
+category = "Productivity"
+
+# The Linux build links ggml's Vulkan backend, which resolves `libvulkan.so.1` at
+# load time. Without the loader installed the app would fail in `ld.so` before
+# `main`, so declare it: apt then pulls it in rather than letting the user discover
+# it as a crash. (The loader is vendor-neutral and tiny; the actual driver comes
+# from mesa-vulkan-drivers or the proprietary NVIDIA/AMD packages.)
+#
+# Windows needs no equivalent: `vulkan-1.dll` is installed by every GPU driver.
+[bundle.deb]
+depends = ["libvulkan1"]

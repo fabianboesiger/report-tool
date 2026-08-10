@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Report tool — five redesigns</title>
+<style>
+  :root{
+    --bg:#fafafa;--surface:#fff;--line:#e8e8e8;--line-2:#d4d4d4;
+    --ink:#0a0a0a;--text:#2b2b2b;--muted:#737373;--faint:#a3a3a3;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{--bg:#0a0a0a;--surface:#141414;--line:#262626;--line-2:#3a3a3a;
+          --ink:#fafafa;--text:#d4d4d4;--muted:#8a8a8a;--faint:#5e5e5e}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1120px;margin:0 auto;padding:64px 32px 96px}
+  h1{margin:0 0 10px;font-size:32px;font-weight:650;letter-spacing:-.025em;color:var(--ink)}
+  .lede{margin:0 0 14px;font-size:16px;color:var(--muted);line-height:1.65;max-width:64ch}
+  .note{font-size:13.5px;color:var(--faint);line-height:1.6;max-width:64ch;margin:0 0 48px}
+  .grid{display:grid;gap:26px}
+  .item{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:28px;align-items:start;
+        border-top:1px solid var(--line);padding-top:26px}
+  .frame{position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface);
+         aspect-ratio:16/10}
+  .frame iframe{position:absolute;top:0;left:0;width:1440px;height:900px;border:0;
+                transform:scale(.48);transform-origin:0 0;pointer-events:none}
+  .frame a{position:absolute;inset:0;display:block}
+  .frame:hover{border-color:var(--line-2)}
+  .meta h2{margin:0 0 3px;font-size:18px;color:var(--ink);font-weight:620;letter-spacing:-.015em}
+  .meta .tag{font-size:12px;color:var(--faint);letter-spacing:.05em;text-transform:uppercase;font-weight:600;margin-bottom:10px;display:block}
+  .meta p{margin:0 0 12px;font-size:14px;color:var(--muted);line-height:1.6}
+  .meta ul{margin:0 0 16px;padding-left:17px;font-size:13.5px;color:var(--muted);line-height:1.65}
+  .meta li{margin-bottom:4px}
+  .open{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;color:var(--ink);text-decoration:none;
+        border:1px solid var(--line-2);border-radius:7px;padding:7px 13px}
+  .open:hover{border-color:var(--muted)}
+  .cut{border-top:1px solid var(--line);margin-top:56px;padding-top:32px}
+  .cut h2{margin:0 0 14px;font-size:15px;color:var(--ink);font-weight:620}
+  .cut table{border-collapse:collapse;width:100%;font-size:13.5px}
+  .cut td{padding:9px 0;border-bottom:1px solid var(--line);vertical-align:top;color:var(--muted);line-height:1.55}
+  .cut td:first-child{width:40%;color:var(--text);padding-right:24px}
+  @media (max-width:860px){.item{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Report tool — five redesigns</h1>
+  <p class="lede">Five directions for the same app, all built around the one thing the user actually does:
+    pick a template, say what happened, get a report back. Each is a working HTML mockup — click through the
+    tabs, press the buttons, toggle light and dark.</p>
+  <p class="note">Nothing in <code>app/</code> was touched. These are standalone files.</p>
+
+  <div class="grid">
+
+    <div class="item">
+      <div class="frame"><iframe src="1-aperture.html" scrolling="no"></iframe><a href="1-aperture.html"></a></div>
+      <div class="meta">
+        <span class="tag">Inspired by Stargate</span>
+        <h2>1 · Aperture</h2>
+        <p>Stargate's Swiss palette applied literally: paper and graphite, hairline rules, no colour accent at all, a fixed left rail with the page title set large and quiet.</p>
+        <ul>
+          <li>Rail: Reports · Current report · Templates · Settings</li>
+          <li>Notes and report side by side, one hairline between them</li>
+          <li>Template builder as an indented outline</li>
+        </ul>
+        <a class="open" href="1-aperture.html">Open →</a>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="frame"><iframe src="2-steps.html" scrolling="no"></iframe><a href="2-steps.html"></a></div>
+      <div class="meta">
+        <span class="tag">Guided</span>
+        <h2>2 · Steps</h2>
+        <p>The flow <em>is</em> the app. Three numbered steps across the top, one screen at a time, nothing else visible. Everything configurable hides behind a single “Set up” door.</p>
+        <ul>
+          <li>Template gallery → notes → report</li>
+          <li>A real writing state, not a frozen button</li>
+          <li>Hardest to get lost in; most clicks for a repeat user</li>
+        </ul>
+        <a class="open" href="2-steps.html">Open →</a>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="frame"><iframe src="3-manuscript.html" scrolling="no"></iframe><a href="3-manuscript.html"></a></div>
+      <div class="meta">
+        <span class="tag">Editorial</span>
+        <h2>3 · Manuscript</h2>
+        <p>The document is the interface. Notes live in the margin the way you'd scribble them beside a page; the report is a sheet of paper. The template is edited as a ghost of the document it produces — each instruction set in the type size it will come out as.</p>
+        <ul>
+          <li>Serif page, warm paper, almost no chrome</li>
+          <li>Formatting bar floats at the bottom</li>
+          <li>Best-looking output; narrowest for long notes</li>
+        </ul>
+        <a class="open" href="3-manuscript.html">Open →</a>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="frame"><iframe src="4-desk.html" scrolling="no"></iframe><a href="4-desk.html"></a></div>
+      <div class="meta">
+        <span class="tag">Familiar</span>
+        <h2>4 · Desk</h2>
+        <p>Opens on a home screen that answers “what do I do now” instead of an empty editor. Cards, soft shadows, one blue. Notes and report are two faces of the same card, so they never compete for the screen.</p>
+        <ul>
+          <li>Continue-where-you-left-off, recents, template gallery</li>
+          <li>Segmented Notes / Report toggle with a sticky action dock</li>
+          <li>Closest to what a non-technical user already expects</li>
+        </ul>
+        <a class="open" href="4-desk.html">Open →</a>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="frame"><iframe src="5-field.html" scrolling="no"></iframe><a href="5-field.html"></a></div>
+      <div class="meta">
+        <span class="tag">Voice first</span>
+        <h2>5 · Field</h2>
+        <p>For someone standing on a roof with one free hand. A single large mic, a timestamped list of what was said, one big button. Typing is the fallback. Dark by default, large targets, narrow column.</p>
+        <ul>
+          <li>Each utterance is its own editable line</li>
+          <li>Reports, templates and settings are bottom sheets</li>
+          <li>Fewest controls on screen of the five</li>
+        </ul>
+        <a class="open" href="5-field.html">Open →</a>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="cut">
+    <h2>What every design drops</h2>
+    <table>
+      <tr><td>The system-prompt panel</td><td>Shows the user the machinery, not their work. It exists to debug prompt-building; a developer flag is the right home for it.</td></tr>
+      <tr><td>The JSON-schema panel</td><td>Same — nobody outside the team can act on it.</td></tr>
+      <tr><td>“Markdown sent to the model” and the live markdown mirror</td><td>The report on screen already <em>is</em> the document. A second copy in monospace invites the question “which one is real?”. Export still writes markdown.</td></tr>
+      <tr><td>The whole right-hand pane</td><td>Every one of its four states was a developer view. Removing it doubles the room the actual work gets.</td></tr>
+      <tr><td>The JSON key next to each template field</td><td>An implementation detail leaking into the field list.</td></tr>
+      <tr><td>Save / Open / New / Save template / Templates as toolbar buttons</td><td>Replaced by a reports list and autosave. “Save” as a decision belongs to 1995.</td></tr>
+      <tr><td>Provider names (Remote / Local / Stub, base URL, context tokens, GGUF path, timeout)</td><td>Restated as the only question that matters — <em>do my notes leave this computer?</em> The rest sits under “Server details”.</td></tr>
+      <tr><td>Node-kind jargon</td><td>“Optional” → <em>Only sometimes</em>; “Repeat” → <em>Repeats, once per defect</em>; a list's <code>ordered</code> flag → <em>numbered</em>.</td></tr>
+    </table>
+  </div>
+</div>
+</body>
+</html>

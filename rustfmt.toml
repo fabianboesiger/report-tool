@@ -1,0 +1,5 @@
+# Matches the style the codebase is written in: 100 columns, and short struct
+# literals, calls and match arms kept on one line rather than exploded across four.
+# Set explicitly so `cargo fmt --check` in CI agrees with what is already here.
+max_width = 100
+use_small_heuristics = "Max"

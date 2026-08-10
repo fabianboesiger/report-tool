@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Report tool — Manuscript</title>
+<style>
+  /* ─── Manuscript ──────────────────────────────────────────────────────────
+     The document is the interface. Notes sit in the margin, the way you'd
+     scribble them next to a page; the report is the page. Almost no chrome.
+     The template is edited as the ghost of the document it produces.
+     ------------------------------------------------------------------- */
+  :root{
+    --bg:#f5f3ef; --page:#fffefb; --line:#e4e0d8; --line-2:#cfc9be;
+    --ink:#191713; --text:#38342d; --muted:#8b8479; --faint:#b0a99d;
+    --accent:#8a4b2a; --accent-soft:#f4e9e1;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Charter,Georgia,serif;
+  }
+  html[data-theme="dark"]{
+    --bg:#12110f; --page:#1a1815; --line:#2a2723; --line-2:#3c3833;
+    --ink:#f4f1ea; --text:#d5d0c6; --muted:#8e877b; --faint:#655f56;
+    --accent:#d99a6c; --accent-soft:#241a13;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;-webkit-font-smoothing:antialiased}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  input{font:inherit;color:inherit}
+
+  /* ── bar ── */
+  .bar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:14px;
+       padding:12px 26px;background:color-mix(in srgb,var(--bg) 86%,transparent);
+       backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+  .back{width:30px;height:30px;border-radius:7px;display:grid;place-items:center;color:var(--muted)}
+  .back:hover{background:var(--line);color:var(--ink)}
+  .back svg{width:17px;height:17px}
+  .title{font-size:14.5px;font-weight:550;color:var(--ink);border:0;outline:0;background:none;width:min(360px,32vw)}
+  .pill{font-size:12px;color:var(--muted);border:1px solid var(--line-2);border-radius:999px;padding:3px 11px;display:flex;gap:6px;align-items:center}
+  .pill:hover{border-color:var(--muted);color:var(--ink)}
+  .pill svg{width:12px;height:12px}
+  .grow{flex:1}
+  .ghost{display:flex;align-items:center;gap:8px;padding:7px 13px;border-radius:8px;font-size:13.5px;color:var(--muted)}
+  .ghost:hover{background:var(--line);color:var(--ink)}
+  .ghost svg{width:15px;height:15px}
+  .go{display:flex;align-items:center;gap:8px;padding:8px 16px;border-radius:8px;font-size:13.5px;font-weight:550;
+      background:var(--ink);color:var(--page)}
+  .go:hover{opacity:.87}
+  .go svg{width:15px;height:15px}
+  .saved{font-size:12px;color:var(--faint)}
+
+  /* ── spread ── */
+  .scroll{height:calc(100vh - 55px);overflow-y:auto}
+  .spread{display:grid;grid-template-columns:280px minmax(0,660px);gap:52px;justify-content:center;padding:54px 32px 140px}
+
+  /* margin notes */
+  .gutter{position:relative}
+  .gutter-head{position:sticky;top:0;display:flex;align-items:center;gap:8px;padding-bottom:12px;margin-bottom:4px}
+  .gutter-head h2{margin:0;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);font-weight:600}
+  .gutter-head .grow{flex:1}
+  .mic{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:3px 10px}
+  .mic .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+  .mic.live{background:var(--accent);color:var(--page)}
+  .mic.live .dot{animation:p 1.3s infinite}
+  @keyframes p{50%{opacity:.2}}
+  .jot{font-size:13.5px;line-height:1.75;color:var(--muted);outline:0;border-left:2px solid var(--line);padding-left:16px}
+  .jot p{margin:0 0 14px}
+  .jot p:hover{color:var(--text)}
+  .jot .ph{color:var(--faint);font-style:italic}
+  .gutter-foot{margin-top:22px;padding-left:18px;font-size:12px;color:var(--faint);line-height:1.6}
+
+  /* page */
+  .page{background:var(--page);border:1px solid var(--line);border-radius:3px;
+        box-shadow:0 1px 2px rgba(0,0,0,.04),0 12px 32px -18px rgba(0,0,0,.18);
+        padding:76px 78px 92px;min-height:70vh}
+  .doc{font-family:var(--serif);font-size:17.5px;line-height:1.72;color:var(--text)}
+  .doc:focus{outline:0}
+  .doc h1{font-size:30px;font-weight:600;line-height:1.2;letter-spacing:-.015em;color:var(--ink);margin:0 0 6px}
+  .doc .stamp{font-family:var(--sans);font-size:12.5px;letter-spacing:.02em;color:var(--faint);margin:0 0 36px}
+  .doc h2{font-size:21px;font-weight:600;color:var(--ink);margin:38px 0 12px}
+  .doc h3{font-size:17px;font-weight:600;color:var(--ink);margin:26px 0 8px}
+  .doc p{margin:0 0 17px}
+  .doc ul,.doc ol{margin:0 0 17px;padding-left:26px}
+  .doc li{margin:0 0 8px}
+  .doc hr{border:0;border-top:1px solid var(--line);margin:38px 0}
+
+  /* empty page */
+  .blank{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:120px 0;text-align:center}
+  .blank svg{width:34px;height:34px;color:var(--faint)}
+  .blank b{font-family:var(--serif);font-size:21px;color:var(--ink);font-weight:500}
+  .blank p{margin:0;font-size:14px;color:var(--muted);max-width:34ch;line-height:1.65}
+
+  /* selection toolbar */
+  .float{position:fixed;right:30px;bottom:30px;z-index:12;
+         display:flex;gap:3px;align-items:center;padding:6px;border-radius:11px;
+         background:var(--page);border:1px solid var(--line);box-shadow:0 6px 26px -10px rgba(0,0,0,.25)}
+  .float button{min-width:32px;height:32px;padding:0 9px;border-radius:7px;display:grid;place-items:center;color:var(--muted);font-size:13.5px}
+  .float button:hover{background:var(--bg);color:var(--ink)}
+  .float .div{width:1px;height:18px;background:var(--line);margin:0 5px}
+
+  /* ── template overlay ── */
+  .scrim{position:fixed;inset:0;z-index:30;background:color-mix(in srgb,var(--bg) 78%,transparent);backdrop-filter:blur(6px);overflow-y:auto}
+  .tpl{max-width:720px;margin:0 auto;padding:52px 32px 120px}
+  .tpl-bar{display:flex;align-items:center;gap:12px;margin-bottom:34px}
+  .tpl-bar h2{margin:0;font-size:15px;color:var(--ink);font-weight:600}
+  .tpl-note{font-size:13.5px;color:var(--muted);line-height:1.65;background:var(--accent-soft);border-radius:10px;padding:14px 17px;margin-bottom:30px}
+  .tname{font-family:var(--serif);font-size:27px;font-weight:600;color:var(--ink);border:0;outline:0;background:none;width:100%;letter-spacing:-.01em}
+  .tpurpose{font-size:14px;color:var(--muted);border:0;outline:0;background:none;width:100%;margin-top:5px}
+  .slot{position:relative;border-radius:8px;padding:9px 12px;margin:5px 0}
+  .slot:hover{background:var(--page)}
+  .slot-head{display:flex;align-items:center;gap:9px;margin-bottom:2px;height:22px}
+  .kind{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);font-weight:600}
+  .kind.rep,.kind.opt{color:var(--accent)}
+  .slot-head input.nm{font-size:12.5px;color:var(--muted);border:0;outline:0;background:none;flex:1;min-width:0}
+  .acts{display:flex;gap:1px;opacity:0}
+  .slot:hover .acts{opacity:1}
+  .acts button{width:24px;height:24px;border-radius:5px;display:grid;place-items:center;color:var(--faint)}
+  .acts button:hover{background:var(--bg);color:var(--ink)}
+  .acts svg{width:13px;height:13px}
+  /* the instruction is set in the type it will produce */
+  .say{font-family:var(--serif);color:var(--text);outline:0}
+  .say.h1{font-size:21px;font-weight:600;color:var(--ink)}
+  .say.h2{font-size:17px;font-weight:600;color:var(--ink)}
+  .say.p{font-size:16px;line-height:1.6}
+  .say.li{font-size:16px;padding-left:20px;position:relative}
+  .say.li::before{content:"•";position:absolute;left:4px;color:var(--faint)}
+  .nest{margin-left:16px;padding-left:16px;border-left:1px solid var(--line-2)}
+  .nest.opt{border-left-style:dashed}
+  .nest.rep{border-left-color:var(--accent)}
+  .bounds{display:flex;gap:14px;margin-top:7px;font-size:11.5px;color:var(--faint);align-items:center}
+  .bounds input{width:42px;border:1px solid var(--line);border-radius:4px;background:var(--page);padding:2px 5px;font-size:11.5px}
+  .add{display:flex;gap:6px;flex-wrap:wrap;margin:9px 0 4px}
+  .add button{font-size:12px;color:var(--muted);border:1px dashed var(--line-2);border-radius:7px;padding:5px 11px}
+  .add button:hover{color:var(--ink);border-style:solid;border-color:var(--muted)}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <button class="back" title="All reports"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 18l-6-6 6-6"/></svg></button>
+  <input class="title" value="Bahnhofstrasse 14 — spring inspection">
+  <button class="pill" onclick="document.getElementById('tpl').hidden=false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg>
+    Site inspection
+  </button>
+  <span class="grow"></span>
+  <span class="saved">Saved</span>
+  <button class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></svg>Export</button>
+  <button class="ghost" onclick="toggleTheme()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+  <button class="go" onclick="write()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg><span id="golbl">Write report</span></button>
+</header>
+
+<div class="scroll">
+  <div class="spread">
+
+    <aside class="gutter">
+      <div class="gutter-head">
+        <h2>Notes</h2><span class="grow"></span>
+        <button class="mic" onclick="this.classList.toggle('live');this.lastChild.textContent=this.classList.contains('live')?' Stop':' Dictate'"><span class="dot"></span><span> Dictate</span></button>
+      </div>
+      <div class="jot" contenteditable>
+        <p>north wall: hairline cracking below the second window, roughly 30 cm long</p>
+        <p>roof: two slipped tiles above the west gable</p>
+        <p>tenant mentioned damp after heavy rain; wants a follow-up before winter</p>
+        <p class="ph">say anything, in any order…</p>
+      </div>
+      <div class="gutter-foot">
+        Fragments are fine. The template decides where each one belongs.
+      </div>
+    </aside>
+
+    <main class="page">
+      <div id="empty" class="blank" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+        <b>Nothing written yet</b>
+        <p>Jot your notes in the margin, then press <strong>Write report</strong>.</p>
+      </div>
+      <article id="doc" class="doc" contenteditable>
+        <h1>Site inspection — Bahnhofstrasse 14</h1>
+        <p class="stamp">10 AUGUST 2026 · F. BÖSIGER</p>
+        <p>The building was inspected on 10 August following the tenant's report of damp after heavy rain. Two defects were recorded, both on the exposed north and west elevations. Neither is structurally urgent, but both should be dealt with before the winter.</p>
+        <h2>Findings</h2>
+        <h3>North wall</h3>
+        <p>Hairline cracking runs approximately 30 cm below the second window. The crack is superficial, with no displacement along its length, which is consistent with settlement rather than ongoing movement.</p>
+        <ol><li>Monitor the crack over one further season.</li><li>Fill and repaint once movement has been ruled out.</li></ol>
+        <h3>Roof, west gable</h3>
+        <p>Two tiles above the west gable have slipped, leaving the underlay exposed. This is the most likely path for the water ingress the tenant described.</p>
+        <ol><li>Re-bed the two slipped tiles.</li><li>Inspect the surrounding course for further movement.</li></ol>
+        <hr>
+        <h2>Follow-up</h2>
+        <ul><li>Return visit before the first frost.</li><li>Confirm with the tenant that the damp has stopped.</li></ul>
+      </article>
+    </main>
+  </div>
+</div>
+
+<div class="float">
+  <button title="Bold"><b>B</b></button>
+  <button title="Italic"><i>I</i></button>
+  <span class="div"></span>
+  <button title="Heading">H₁</button>
+  <button title="Subheading">H₂</button>
+  <button title="Bullets">•</button>
+  <button title="Numbered">1.</button>
+  <span class="div"></span>
+  <button title="Undo">↶</button>
+  <button title="Redo">↷</button>
+</div>
+
+<!-- ── template as a ghost document ── -->
+<div class="scrim" id="tpl" hidden>
+  <div class="tpl">
+    <div class="tpl-bar">
+      <button class="back" onclick="document.getElementById('tpl').hidden=true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      <h2>Template</h2>
+      <span class="grow"></span>
+      <button class="ghost">Duplicate</button>
+      <button class="go" onclick="document.getElementById('tpl').hidden=true">Save template</button>
+    </div>
+
+    <p class="tpl-note">This is the shape of the report, not the report itself. Each line below says what belongs there — written in the size and style it will come out as.</p>
+
+    <input class="tname" value="Site inspection">
+    <input class="tpurpose" value="A record of a building inspection visit.">
+
+    <div style="margin-top:28px">
+      <div class="slot">
+        <div class="slot-head"><span class="kind">Paragraph</span><input class="nm" value="Summary">
+          <span class="acts"><button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 15-6-6-6 6"/></svg></button><button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button><button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></span>
+        </div>
+        <div class="say p" contenteditable>Two or three sentences summarising the visit.</div>
+      </div>
+
+      <div class="slot">
+        <div class="slot-head"><span class="kind">Heading</span><input class="nm" value="Findings">
+          <span class="acts"><button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 15-6-6-6 6"/></svg></button><button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button><button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></span>
+        </div>
+        <div class="say h1" contenteditable>A heading naming the inspected area.</div>
+      </div>
+      <div class="nest">
+        <div class="slot">
+          <div class="slot-head"><span class="kind">Paragraph</span><input class="nm" value="Overview"></div>
+          <div class="say p" contenteditable>What was observed overall.</div>
+        </div>
+        <div class="slot">
+          <div class="slot-head"><span class="kind rep">Repeats</span><input class="nm" value="Defects"></div>
+          <div class="say p" contenteditable>One group per defect mentioned in the notes.</div>
+          <div class="bounds">
+            <span>once per <input value="defect" style="width:72px"></span>
+            <span>at least <input type="number" value="1"></span>
+            <span>at most <input type="number" placeholder="any"></span>
+          </div>
+        </div>
+        <div class="nest rep">
+          <div class="slot">
+            <div class="slot-head"><span class="kind">Heading</span><input class="nm" value="Location"></div>
+            <div class="say h2" contenteditable>The defect's location.</div>
+          </div>
+          <div class="nest">
+            <div class="slot">
+              <div class="slot-head"><span class="kind">Paragraph</span><input class="nm" value="Detail"></div>
+              <div class="say p" contenteditable>What is wrong and how severe it is.</div>
+            </div>
+          </div>
+          <div class="slot">
+            <div class="slot-head"><span class="kind">Numbered list</span><input class="nm" value="Actions"></div>
+            <div class="say li" contenteditable>Recommended remedial actions.</div>
+            <div class="bounds"><span>at least <input type="number" value="1"></span><span>at most <input type="number" value="5"></span></div>
+          </div>
+          <div class="add"><button>+ Paragraph</button><button>+ List</button><button>+ Heading</button></div>
+        </div>
+        <div class="add"><button>+ Paragraph</button><button>+ List</button><button>+ Heading</button><button>+ Only sometimes</button><button>+ Repeats</button></div>
+      </div>
+
+      <div class="slot">
+        <div class="slot-head"><span class="kind opt">Only sometimes</span><input class="nm" value="Follow-up"></div>
+        <div class="say p" contenteditable>Include only if a follow-up visit is needed.</div>
+      </div>
+      <div class="nest opt">
+        <div class="slot">
+          <div class="slot-head"><span class="kind">Bulleted list</span><input class="nm" value="Next steps"></div>
+          <div class="say li" contenteditable>What must happen before the next visit.</div>
+        </div>
+        <div class="add"><button>+ Paragraph</button><button>+ List</button></div>
+      </div>
+
+      <div class="add" style="margin-top:16px"><button>+ Paragraph</button><button>+ List</button><button>+ Heading</button><button>+ Only sometimes</button><button>+ Repeats</button></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function write(){
+    const doc = document.getElementById('doc'), empty = document.getElementById('empty'), lbl = document.getElementById('golbl');
+    doc.hidden = true; empty.hidden = true;
+    lbl.textContent = 'Writing…';
+    setTimeout(() => { doc.hidden = false; lbl.textContent = 'Write again'; }, 1400);
+  }
+  function toggleTheme(){
+    const r = document.documentElement;
+    r.dataset.theme = r.dataset.theme === 'dark' ? 'light' : 'dark';
+  }
+</script>
+</body>
+</html>

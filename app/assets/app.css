@@ -1,0 +1,289 @@
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+
+body {
+  --fg: #1a1a1a;
+  --muted: #8a8a8a;
+  --rule: #e2e2e2;
+  --accent: #2f6feb;
+  --surface: #fafafa;
+  --bg: #fff;
+
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    --fg: #e8e8e8;
+    --muted: #7c7c7c;
+    --rule: #333;
+    --accent: #6c9dff;
+    --surface: #1e1e21;
+    --bg: #161618;
+  }
+}
+
+.app { height: 100vh; display: flex; flex-direction: column; }
+
+.app-bar {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.5rem 1rem; border-bottom: 1px solid var(--rule);
+}
+.app-bar h1 { font-size: 0.95rem; margin: 0 0.5rem 0 0; font-weight: 600; }
+.app-backend { margin-left: auto; font-size: 0.75rem; opacity: 0.5; }
+
+.app-tab {
+  border: none; background: transparent; color: var(--fg);
+  font: inherit; font-size: 0.85rem; padding: 0.3rem 0.7rem;
+  border-radius: 5px; cursor: pointer; opacity: 0.65;
+}
+.app-tab:hover { background: var(--surface); }
+.app-tab.is-active { background: var(--accent); color: #fff; opacity: 1; }
+
+.app-panes { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; }
+.app-pane { min-height: 0; display: flex; flex-direction: column; padding: 0 1rem; overflow: hidden; }
+.app-pane + .app-pane { border-left: 1px solid var(--rule); }
+.app-pane-title {
+  font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em;
+  opacity: 0.5; margin: 0.8rem 0 0.2rem; flex: none;
+}
+.app-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 2rem; }
+
+.app-markdown {
+  flex: 1; min-height: 0; overflow: auto; margin: 0.5rem 0 1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem; line-height: 1.55; white-space: pre-wrap; opacity: 0.8;
+}
+
+/* --- template builder ---------------------------------------------------- */
+
+.tb { padding: 0.6rem 0 2rem; }
+
+.tb-meta { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 1rem; }
+.tb-name, .tb-purpose, .tb-label, .tb-item-label {
+  border: 1px solid transparent; border-radius: 4px;
+  background: transparent; color: var(--fg); font: inherit;
+  padding: 0.2rem 0.35rem;
+}
+.tb-name:hover, .tb-purpose:hover, .tb-label:hover, .tb-item-label:hover { border-color: var(--rule); }
+.tb-name:focus, .tb-purpose:focus, .tb-label:focus, .tb-item-label:focus {
+  outline: none; border-color: var(--accent); background: var(--bg);
+}
+.tb-name { font-size: 1.15rem; font-weight: 620; }
+.tb-purpose { font-size: 0.85rem; opacity: 0.75; }
+
+.tb-list { display: flex; flex-direction: column; gap: 0.4rem; }
+
+.tb-node {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 0.45rem 0.55rem;
+  background: var(--bg);
+}
+/* Containers are visibly boxes so nesting is readable at a glance. */
+.tb-section { background: var(--surface); }
+.tb-optional { border-style: dashed; }
+.tb-repeat { border-left: 3px solid var(--accent); }
+
+.tb-head { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.2rem; }
+.tb-spacer { flex: 1; }
+
+.tb-chip {
+  font-size: 0.66rem; letter-spacing: 0.03em;
+  padding: 0.1rem 0.4rem; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--rule);
+  color: var(--muted); white-space: nowrap; user-select: none;
+}
+.tb-chip-section { color: var(--accent); border-color: var(--accent); }
+.tb-chip-repeat { color: var(--accent); }
+
+.tb-label { flex: 0 1 14rem; font-size: 0.85rem; font-weight: 500; }
+.tb-key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.66rem; color: var(--muted); opacity: 0.7;
+}
+
+.tb-btn, .tb-add-btn {
+  border: none; background: transparent; color: var(--fg);
+  font: inherit; font-size: 0.78rem; padding: 0.15rem 0.4rem;
+  border-radius: 4px; cursor: pointer; opacity: 0.6;
+}
+.tb-btn:hover, .tb-add-btn:hover { background: var(--surface); opacity: 1; }
+.tb-danger:hover { background: #e5484d; color: #fff; }
+
+/* The instruction is styled like the thing it will produce, so the template reads
+   as the document it becomes. */
+.tb-desc { padding: 0.15rem 0.35rem; border-radius: 4px; }
+.tb-desc:hover { background: var(--surface); }
+.tb-desc:focus { background: var(--bg); box-shadow: inset 0 0 0 1px var(--accent); }
+
+.tb-as-h1 { font-size: 1.5em; font-weight: 650; }
+.tb-as-h2 { font-size: 1.3em; font-weight: 650; }
+.tb-as-h3 { font-size: 1.15em; font-weight: 640; }
+.tb-as-h4 { font-size: 1.05em; font-weight: 620; }
+.tb-as-h5 { font-size: 1em; font-weight: 600; }
+.tb-as-h6 { font-size: 0.94em; font-weight: 600; color: var(--muted); }
+.tb-as-p { font-size: 0.9em; }
+.tb-as-list { font-size: 0.9em; padding-left: 1.1rem; position: relative; }
+.tb-as-list::after {
+  content: "•"; position: absolute; left: 0.25rem; top: 0.15rem;
+  color: var(--muted); pointer-events: none;
+}
+.tb-as-note { font-size: 0.82em; font-style: italic; color: var(--muted); }
+
+.tb-opts {
+  display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap;
+  margin-top: 0.25rem; font-size: 0.75rem; color: var(--muted);
+}
+.tb-opts input[type="number"] {
+  width: 3.2rem; font: inherit; padding: 0.1rem 0.25rem;
+  border: 1px solid var(--rule); border-radius: 4px;
+  background: transparent; color: var(--fg);
+}
+.tb-item-label { font-size: 0.75rem; flex: 0 1 16rem; }
+.tb-bound { display: inline-flex; align-items: center; gap: 0.25rem; }
+
+.tb-add { display: flex; gap: 0.15rem; flex-wrap: wrap; padding: 0.1rem 0; }
+.tb-add-btn { font-size: 0.72rem; color: var(--muted); }
+.tb-node > .tb-list { margin-top: 0.4rem; padding-left: 0.7rem; border-left: 1px dotted var(--rule); }
+
+/* --- generation controls -------------------------------------------------- */
+
+.app-spacer { flex: 1; }
+.app-backend { font-size: 0.74rem; opacity: 0.55; }
+
+.app-generate {
+  border: none; border-radius: 5px; background: var(--accent); color: #fff;
+  font: inherit; font-size: 0.82rem; font-weight: 550;
+  padding: 0.32rem 0.8rem; cursor: pointer;
+}
+.app-generate:disabled { opacity: 0.55; cursor: default; }
+
+.app-error {
+  padding: 0.5rem 1rem; font-size: 0.8rem; line-height: 1.5;
+  background: #fdecec; color: #8c1c1c; border-bottom: 1px solid #f3c3c3;
+  white-space: pre-wrap;
+}
+@media (prefers-color-scheme: dark) {
+  .app-error { background: #38191b; color: #ffb4b4; border-color: #5a2528; }
+}
+
+.app-empty { font-size: 0.85rem; opacity: 0.6; margin-top: 1.5rem; line-height: 1.6; }
+
+/* --- settings ------------------------------------------------------------- */
+
+.sp { padding: 0.6rem 0 2rem; max-width: 34rem; font-size: 0.85rem; }
+.sp-group { border: 1px solid var(--rule); border-radius: 6px; padding: 0.6rem 0.8rem 0.8rem; margin: 0 0 0.9rem; }
+.sp-group legend { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.55; padding: 0 0.3rem; }
+
+.sp-radio { display: grid; grid-template-columns: auto auto 1fr; align-items: baseline; gap: 0.4rem; padding: 0.2rem 0; }
+.sp-radio-label { font-weight: 520; }
+
+.sp-field { display: flex; flex-direction: column; gap: 0.15rem; margin: 0.5rem 0; }
+.sp-field-label { font-size: 0.75rem; opacity: 0.7; }
+.sp-field input {
+  font: inherit; padding: 0.3rem 0.4rem; border-radius: 4px;
+  border: 1px solid var(--rule); background: var(--bg); color: var(--fg);
+}
+.sp-field input:focus { outline: none; border-color: var(--accent); }
+
+.sp-hint { font-size: 0.72rem; opacity: 0.5; line-height: 1.4; }
+
+.sp-actions { display: flex; align-items: center; gap: 0.6rem; }
+.sp-save {
+  border: 1px solid var(--rule); border-radius: 5px; background: var(--surface);
+  color: var(--fg); font: inherit; font-size: 0.8rem; padding: 0.3rem 0.7rem; cursor: pointer;
+}
+.sp-save:hover { border-color: var(--accent); }
+.sp-ok { font-size: 0.78rem; color: #2f8f4e; }
+.sp-error { font-size: 0.78rem; color: #c33; }
+
+/* --- dictation ------------------------------------------------------------ */
+
+.app-pane-head { display: flex; align-items: center; gap: 0.6rem; }
+
+.app-record {
+  border: 1px solid var(--rule); border-radius: 5px;
+  background: transparent; color: var(--fg);
+  font: inherit; font-size: 0.75rem; padding: 0.2rem 0.6rem; cursor: pointer;
+}
+.app-record:hover:not(:disabled) { border-color: var(--accent); }
+.app-record:disabled { opacity: 0.55; cursor: default; }
+.app-record.is-recording {
+  background: #e5484d; border-color: #e5484d; color: #fff;
+  /* A recording indicator has to be unmistakable: it is the one state where the
+     app is capturing something the user may not want captured. */
+  animation: app-pulse 1.4s ease-in-out infinite;
+}
+@keyframes app-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.65; } }
+
+.app-dictate-error { font-size: 0.78rem; color: #c33; margin: 0.2rem 0 0; line-height: 1.45; }
+
+/* --- library bar ---------------------------------------------------------- */
+
+.lib {
+  display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap;
+  padding: 0.35rem 1rem; border-bottom: 1px solid var(--rule);
+  background: var(--surface); font-size: 0.78rem;
+}
+
+.lib-name {
+  font: inherit; font-weight: 520; padding: 0.22rem 0.4rem; min-width: 12rem;
+  border: 1px solid transparent; border-radius: 4px;
+  background: transparent; color: var(--fg);
+}
+.lib-name:hover { border-color: var(--rule); }
+.lib-name:focus { outline: none; border-color: var(--accent); background: var(--bg); }
+
+.lib-btn, .lib-pick {
+  font: inherit; font-size: 0.76rem; padding: 0.22rem 0.5rem;
+  border: 1px solid var(--rule); border-radius: 4px;
+  background: var(--bg); color: var(--fg); cursor: pointer;
+}
+.lib-btn:hover:not(:disabled), .lib-pick:hover:not(:disabled) { border-color: var(--accent); }
+.lib-btn:disabled, .lib-pick:disabled { opacity: 0.45; cursor: default; }
+
+.lib-sep { width: 1px; height: 1.1rem; background: var(--rule); margin: 0 0.3rem; }
+.lib-spacer { flex: 1; }
+.lib-status { font-size: 0.74rem; opacity: 0.6; min-width: 6rem; }
+
+/* --- model downloads ------------------------------------------------------ */
+
+.dl {
+  padding: 0.45rem 1rem 0.55rem;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+}
+
+.dl-row {
+  display: grid;
+  grid-template-columns: 14rem 1fr 10rem;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.12rem 0;
+  font-size: 0.75rem;
+}
+
+.dl-name { font-weight: 520; }
+
+.dl-track {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--rule);
+  overflow: hidden;
+}
+
+.dl-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  /* Eases between the chunk-by-chunk jumps so the bar reads as movement rather
+     than as a series of steps. */
+  transition: width 0.25s linear;
+}
+.dl-fill.is-failed { background: #e5484d; }
+
+.dl-detail { font-size: 0.72rem; opacity: 0.6; text-align: right; }
+.dl-note { font-size: 0.7rem; opacity: 0.45; margin: 0.3rem 0 0; }

@@ -1,0 +1,18 @@
+[package]
+name = "report-editor"
+version.workspace = true
+edition.workspace = true
+
+# The WYSIWYG block editor, as a standalone Dioxus component library.
+#
+# Depends on `dioxus` and `report-doc` and nothing else — in particular it must
+# never learn about `Template`, `Report` or any other domain type. That constraint
+# is the whole reason this is a crate rather than a module in `app`: the template
+# builder composes `EditableText` from here and supplies its own chrome, so both
+# surfaces share the editing behaviour without the library sharing their vocabulary.
+[dependencies]
+report-doc = { workspace = true }
+dioxus = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }

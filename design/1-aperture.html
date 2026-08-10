@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Report tool — Aperture</title>
+<style>
+  /* ─── Aperture ────────────────────────────────────────────────────────────
+     Swiss minimalist, after Stargate: paper + graphite, hairline rules,
+     one accent (there isn't one — the accent is ink), high whitespace.
+     ------------------------------------------------------------------- */
+  :root{
+    --bg:#fafafa; --surface:#ffffff; --sunk:#f4f4f4;
+    --line:#e8e8e8; --line-2:#d4d4d4;
+    --ink:#0a0a0a; --text:#2b2b2b; --muted:#737373; --faint:#a3a3a3;
+    --accent:#171717; --on-accent:#ffffff;
+    --warn:#8a6d00; --warn-bg:#fdf6e0;
+    --r:8px; --rail:224px;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+    --serif:"Iowan Old Style","Charter",Georgia,serif;
+  }
+  html[data-theme="dark"]{
+    --bg:#0a0a0a; --surface:#141414; --sunk:#1a1a1a;
+    --line:#262626; --line-2:#3a3a3a;
+    --ink:#fafafa; --text:#d4d4d4; --muted:#8a8a8a; --faint:#5e5e5e;
+    --accent:#fafafa; --on-accent:#0a0a0a;
+    --warn:#e5c76b; --warn-bg:#241f10;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;-webkit-font-smoothing:antialiased}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  input,textarea{font:inherit;color:inherit}
+
+  .shell{display:flex;height:100vh}
+
+  /* ── rail ── */
+  .rail{width:var(--rail);flex:none;background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column}
+  .brand{display:flex;align-items:center;gap:10px;padding:20px 20px 24px;font-weight:600;color:var(--ink);letter-spacing:-.01em}
+  .brand svg{width:22px;height:22px}
+  .nav{flex:1;padding:0 12px;display:flex;flex-direction:column;gap:2px}
+  .nav-label{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);padding:14px 12px 6px}
+  .nav a{display:flex;align-items:center;gap:11px;padding:8px 12px;border-radius:6px;color:var(--muted);text-decoration:none;font-size:13.5px}
+  .nav a:hover{background:var(--sunk);color:var(--text)}
+  .nav a.on{background:var(--sunk);color:var(--ink);font-weight:550}
+  .nav svg{width:16px;height:16px;flex:none}
+  .rail-foot{padding:12px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
+  .rail-foot button{display:flex;align-items:center;gap:11px;padding:8px 12px;border-radius:6px;color:var(--muted);font-size:13.5px;width:100%}
+  .rail-foot button:hover{background:var(--sunk);color:var(--text)}
+  .rail-foot svg{width:15px;height:15px}
+  .where{padding:10px 12px;font-size:11.5px;color:var(--faint);line-height:1.5}
+  .where b{display:block;color:var(--muted);font-weight:550}
+
+  /* ── main ── */
+  .main{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+  .head{padding:30px 40px 22px;display:flex;align-items:flex-end;gap:16px}
+  .head h1{margin:0;font-size:25px;font-weight:650;letter-spacing:-.02em;color:var(--ink)}
+  .head p{margin:5px 0 0;font-size:13px;color:var(--muted)}
+  .head .grow{flex:1}
+  .body{flex:1;min-height:0;overflow-y:auto;padding:0 40px 56px}
+
+  /* ── buttons ── */
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:6px;border:1px solid var(--line-2);font-size:13.5px;color:var(--text);background:var(--surface)}
+  .btn:hover{border-color:var(--muted)}
+  .btn svg{width:15px;height:15px}
+  .btn-primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:550}
+  .btn-primary:hover{opacity:.86}
+  .btn-quiet{border-color:transparent;color:var(--muted)}
+  .btn-quiet:hover{background:var(--sunk);color:var(--text);border-color:transparent}
+
+  /* ── reports list ── */
+  .list{border-top:1px solid var(--line)}
+  .row{display:flex;align-items:center;gap:18px;padding:15px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+  .row:hover{background:var(--surface)}
+  .row .name{font-size:15px;color:var(--ink);font-weight:520;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .from{font-size:12.5px;color:var(--muted);width:190px;flex:none}
+  .row .when{font-size:12.5px;color:var(--faint);width:110px;flex:none;text-align:right}
+  .tag{font-size:11px;color:var(--muted);border:1px solid var(--line-2);border-radius:999px;padding:2px 9px;flex:none}
+  .tag.draft{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
+  .search{display:flex;align-items:center;gap:9px;border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:8px 12px;width:280px}
+  .search input{border:0;outline:0;background:none;width:100%;font-size:13.5px}
+  .search svg{width:15px;height:15px;color:var(--faint);flex:none}
+
+  /* ── editor split ── */
+  .split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:0;height:100%}
+  .pane{min-width:0;display:flex;flex-direction:column;overflow:hidden}
+  .pane + .pane{border-left:1px solid var(--line)}
+  .pane-head{display:flex;align-items:center;gap:10px;padding:14px 28px 12px}
+  .pane-head h2{margin:0;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);font-weight:600}
+  .pane-head .grow{flex:1}
+  .pane-body{flex:1;min-height:0;overflow-y:auto;padding:4px 28px 40px}
+  .notes{font-size:15px;line-height:1.75;color:var(--text)}
+  .notes p{margin:0 0 14px}
+  .notes .ph{color:var(--faint)}
+  .doc{font-family:var(--serif);font-size:16px;line-height:1.72;color:var(--text);max-width:60ch}
+  .doc h1{font-family:var(--sans);font-size:22px;font-weight:650;letter-spacing:-.02em;color:var(--ink);margin:0 0 4px}
+  .doc h2{font-family:var(--sans);font-size:15px;font-weight:620;color:var(--ink);margin:28px 0 8px;letter-spacing:-.01em}
+  .doc h3{font-family:var(--sans);font-size:13.5px;font-weight:600;color:var(--text);margin:20px 0 6px}
+  .doc p{margin:0 0 14px}
+  .doc ul,.doc ol{margin:0 0 14px;padding-left:22px}
+  .doc li{margin:0 0 6px}
+  .doc .stamp{font-family:var(--sans);font-size:12px;color:var(--faint);margin:0 0 26px}
+  .rec{display:inline-flex;align-items:center;gap:8px;padding:7px 13px;border-radius:999px;border:1px solid var(--line-2);font-size:13px;color:var(--text)}
+  .rec .dot{width:8px;height:8px;border-radius:50%;background:#d24b4b}
+  .rec.live{border-color:#d24b4b;color:#d24b4b}
+  .rec.live .dot{animation:pulse 1.4s infinite}
+  @keyframes pulse{50%{opacity:.25}}
+
+  /* ── template builder ── */
+  .tpl{max-width:760px}
+  .tpl-name{font-size:22px;font-weight:650;letter-spacing:-.02em;color:var(--ink);border:0;outline:0;background:none;width:100%;padding:2px 0}
+  .tpl-purpose{font-size:13.5px;color:var(--muted);border:0;outline:0;background:none;width:100%;padding:4px 0 0}
+  .tpl-list{margin-top:26px;display:flex;flex-direction:column;gap:8px}
+  .node{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:12px 14px}
+  .node:hover{border-color:var(--line-2)}
+  .node.section{background:var(--sunk)}
+  .node.optional{border-style:dashed}
+  .node.repeat{border-left:2px solid var(--ink)}
+  .node-head{display:flex;align-items:center;gap:10px}
+  .node-head .kind{font-size:11px;color:var(--muted);letter-spacing:.04em;width:70px;flex:none}
+  .node-head .lbl{font-size:14px;font-weight:550;color:var(--ink);border:0;background:none;outline:0;flex:1;min-width:0}
+  .node-head .acts{display:flex;gap:2px;opacity:0;transition:opacity .12s}
+  .node:hover .node-head .acts{opacity:1}
+  .icon-btn{width:26px;height:26px;display:grid;place-items:center;border-radius:5px;color:var(--faint)}
+  .icon-btn:hover{background:var(--bg);color:var(--text)}
+  .icon-btn svg{width:14px;height:14px}
+  .node-desc{margin-top:6px;font-size:13.5px;color:var(--muted);line-height:1.6}
+  .node-desc.as-h{font-size:15px;color:var(--text);font-weight:550}
+  .node-opts{margin-top:9px;display:flex;gap:16px;font-size:12px;color:var(--faint);align-items:center}
+  .node-opts input[type=number]{width:44px;border:1px solid var(--line);border-radius:4px;background:var(--bg);padding:2px 5px;font-size:12px}
+  .kids{margin:10px 0 0 18px;padding-left:14px;border-left:1px solid var(--line-2);display:flex;flex-direction:column;gap:8px}
+  .add{display:flex;gap:6px;flex-wrap:wrap;padding-top:2px}
+  .add button{font-size:12.5px;color:var(--muted);border:1px dashed var(--line-2);border-radius:6px;padding:6px 11px}
+  .add button:hover{color:var(--ink);border-color:var(--muted);border-style:solid}
+
+  /* ── settings ── */
+  .set{max-width:620px}
+  .group{border-top:1px solid var(--line);padding:24px 0}
+  .group:first-child{border-top:0;padding-top:6px}
+  .group h3{margin:0 0 3px;font-size:14px;font-weight:600;color:var(--ink)}
+  .group .sub{margin:0 0 16px;font-size:13px;color:var(--muted);line-height:1.55}
+  .choice{display:flex;gap:12px;align-items:flex-start;padding:13px 15px;border:1px solid var(--line);border-radius:var(--r);margin-bottom:8px;background:var(--surface);cursor:pointer}
+  .choice.on{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+  .choice .r{width:15px;height:15px;border-radius:50%;border:1.5px solid var(--line-2);margin-top:2px;flex:none;position:relative}
+  .choice.on .r{border-color:var(--ink)}
+  .choice.on .r::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--ink)}
+  .choice b{display:block;font-size:13.5px;font-weight:550;color:var(--ink);margin-bottom:2px}
+  .choice span{font-size:12.5px;color:var(--muted);line-height:1.5}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:5px}
+  .field input{width:100%;border:1px solid var(--line-2);border-radius:6px;background:var(--surface);padding:8px 11px;font-size:13.5px;outline:0}
+  .field input:focus{border-color:var(--ink)}
+  details.adv{margin-top:6px}
+  details.adv summary{font-size:12.5px;color:var(--muted);cursor:pointer;list-style:none;padding:6px 0}
+  details.adv summary::-webkit-details-marker{display:none}
+  details.adv summary::before{content:"▸ ";color:var(--faint)}
+  details.adv[open] summary::before{content:"▾ "}
+
+  /* download banner */
+  .banner{display:flex;align-items:center;gap:14px;margin:0 40px 18px;padding:11px 15px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);font-size:13px;color:var(--muted)}
+  .bar{flex:1;height:3px;background:var(--line);border-radius:2px;overflow:hidden;max-width:220px}
+  .bar i{display:block;height:100%;width:62%;background:var(--ink)}
+
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="rail">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.2"/></svg>
+      Report tool
+    </div>
+    <nav class="nav">
+      <a href="#" class="on" data-go="reports"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>Reports</a>
+      <a href="#" data-go="editor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>Current report</a>
+      <div class="nav-label">Set up</div>
+      <a href="#" data-go="template"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12"/></svg>Templates</a>
+      <a href="#" data-go="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 15H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 9 4.6h.1A2 2 0 1 1 13 4.6V4.7A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.9.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 19.4 9V9a2 2 0 1 1 0 4z"/></svg>Settings</a>
+    </nav>
+    <div class="where">
+      <b>Writing on this Mac</b>
+      Nothing leaves the device
+    </div>
+    <div class="rail-foot">
+      <button onclick="toggleTheme()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>Appearance</button>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- ══ REPORTS ══ -->
+    <section id="reports">
+      <div class="head">
+        <div><h1>Reports</h1><p>12 reports · last written 2 hours ago</p></div>
+        <div class="grow"></div>
+        <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><input placeholder="Search reports"></div>
+        <button class="btn btn-primary" data-go="editor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>New report</button>
+      </div>
+      <div class="body">
+        <div class="list">
+          <div class="row" data-go="editor"><span class="name">Bahnhofstrasse 14 — spring inspection</span><span class="from">Site inspection</span><span class="tag draft">Draft</span><span class="when">2 hours ago</span></div>
+          <div class="row"><span class="name">Seefeldquai 3 — roof survey</span><span class="from">Site inspection</span><span class="tag">Final</span><span class="when">Yesterday</span></div>
+          <div class="row"><span class="name">Werkhof Nord — annual review</span><span class="from">Site inspection</span><span class="tag">Final</span><span class="when">4 Aug</span></div>
+          <div class="row"><span class="name">Client call — Meier AG</span><span class="from">Meeting note</span><span class="tag">Final</span><span class="when">2 Aug</span></div>
+          <div class="row"><span class="name">Lindenweg 22 — handover</span><span class="from">Handover protocol</span><span class="tag">Final</span><span class="when">28 Jul</span></div>
+          <div class="row"><span class="name">Quartierzentrum — damp follow-up</span><span class="from">Site inspection</span><span class="tag">Final</span><span class="when">21 Jul</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ EDITOR ══ -->
+    <section id="editor" hidden style="flex:1;min-height:0;display:flex;flex-direction:column">
+      <div class="head">
+        <div>
+          <h1 contenteditable style="outline:0">Bahnhofstrasse 14 — spring inspection</h1>
+          <p>Site inspection · saved automatically</p>
+        </div>
+        <div class="grow"></div>
+        <button class="btn btn-quiet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></svg>Export</button>
+        <button class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>Write report</button>
+      </div>
+      <div class="banner">
+        <span>Preparing the writing model — 3.2 GB of 5.2 GB</span>
+        <div class="bar"><i></i></div>
+        <span style="color:var(--faint)">You can keep taking notes</span>
+      </div>
+      <div class="body" style="padding:0;flex:1;min-height:0">
+        <div class="split">
+          <div class="pane">
+            <div class="pane-head"><h2>Your notes</h2><div class="grow"></div>
+              <button class="rec"><span class="dot"></span>Dictate</button>
+            </div>
+            <div class="pane-body notes" contenteditable>
+              <p>north wall: hairline cracking below the second window, roughly 30 cm long</p>
+              <p>roof: two slipped tiles above the west gable</p>
+              <p>tenant mentioned damp after heavy rain; wants a follow-up before winter</p>
+              <p class="ph">Keep going — anything you say here ends up in the right place.</p>
+            </div>
+          </div>
+          <div class="pane">
+            <div class="pane-head"><h2>Report</h2><div class="grow"></div>
+              <span style="font-size:12px;color:var(--faint)">Written 14:02 · edit freely</span>
+            </div>
+            <div class="pane-body">
+              <div class="doc" contenteditable>
+                <h1>Site inspection — Bahnhofstrasse 14</h1>
+                <p class="stamp">10 August 2026</p>
+                <p>The building was inspected on 10 August following the tenant's report of damp. Two defects were recorded, both on the exposed north and west elevations. Neither is structurally urgent, but both should be addressed before the winter.</p>
+                <h2>Findings</h2>
+                <h3>North wall</h3>
+                <p>Hairline cracking runs approximately 30 cm below the second window. The crack is superficial and shows no displacement, consistent with settlement rather than movement.</p>
+                <ol><li>Monitor the crack over one further season.</li><li>Fill and repaint once movement has been ruled out.</li></ol>
+                <h3>Roof, west gable</h3>
+                <p>Two tiles above the west gable have slipped, leaving the underlay exposed. This is the most likely path for the water ingress the tenant described.</p>
+                <ol><li>Re-bed the two slipped tiles.</li><li>Inspect the surrounding course for further movement.</li></ol>
+                <h2>Follow-up</h2>
+                <ul><li>Return visit before the first frost.</li><li>Confirm with the tenant that the damp has stopped.</li></ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ TEMPLATE ══ -->
+    <section id="template" hidden>
+      <div class="head">
+        <div><h1>Templates</h1><p>The shape each kind of report follows · 3 saved</p></div>
+        <div class="grow"></div>
+        <button class="btn btn-quiet">Duplicate</button>
+        <button class="btn btn-primary">Save template</button>
+      </div>
+      <div class="body">
+        <div class="tpl">
+          <input class="tpl-name" value="Site inspection">
+          <input class="tpl-purpose" value="A record of a building inspection visit.">
+
+          <div class="tpl-list">
+            <div class="node">
+              <div class="node-head"><span class="kind">Paragraph</span><input class="lbl" value="Summary">
+                <span class="acts"><button class="icon-btn" title="Move up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 15-6-6-6 6"/></svg></button><button class="icon-btn" title="Move down"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button><button class="icon-btn" title="Remove"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></span>
+              </div>
+              <div class="node-desc" contenteditable>Two or three sentences summarising the visit.</div>
+            </div>
+
+            <div class="node section">
+              <div class="node-head"><span class="kind">Section</span><input class="lbl" value="Findings">
+                <span class="acts"><button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 15-6-6-6 6"/></svg></button><button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button><button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></span>
+              </div>
+              <div class="node-desc as-h" contenteditable>A heading naming the inspected area.</div>
+              <div class="kids">
+                <div class="node">
+                  <div class="node-head"><span class="kind">Paragraph</span><input class="lbl" value="Overview"></div>
+                  <div class="node-desc" contenteditable>What was observed overall.</div>
+                </div>
+                <div class="node repeat">
+                  <div class="node-head"><span class="kind">Repeats</span><input class="lbl" value="Defects"></div>
+                  <div class="node-desc" contenteditable>One group per defect mentioned in the notes.</div>
+                  <div class="node-opts">
+                    <span>one per <input value="defect" style="width:80px;border:1px solid var(--line);border-radius:4px;background:var(--bg);padding:2px 6px;font-size:12px"></span>
+                    <span>at least <input type="number" value="1"></span>
+                    <span>at most <input type="number" placeholder="—"></span>
+                  </div>
+                  <div class="kids">
+                    <div class="node section">
+                      <div class="node-head"><span class="kind">Section</span><input class="lbl" value="Location"></div>
+                      <div class="node-desc as-h" contenteditable>The defect's location.</div>
+                    </div>
+                    <div class="node">
+                      <div class="node-head"><span class="kind">List</span><input class="lbl" value="Actions"></div>
+                      <div class="node-desc" contenteditable>Recommended remedial actions.</div>
+                      <div class="node-opts"><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" checked> numbered</label><span>at least <input type="number" value="1"></span><span>at most <input type="number" value="5"></span></div>
+                    </div>
+                    <div class="add"><button>+ Paragraph</button><button>+ List</button><button>+ Section</button></div>
+                  </div>
+                </div>
+                <div class="add"><button>+ Paragraph</button><button>+ List</button><button>+ Section</button><button>+ Only sometimes</button><button>+ Repeats</button></div>
+              </div>
+            </div>
+
+            <div class="node optional">
+              <div class="node-head"><span class="kind">Sometimes</span><input class="lbl" value="Follow-up"></div>
+              <div class="node-desc" contenteditable>Include only if a follow-up visit is needed.</div>
+              <div class="kids">
+                <div class="node">
+                  <div class="node-head"><span class="kind">List</span><input class="lbl" value="Next steps"></div>
+                  <div class="node-desc" contenteditable>What must happen before the next visit.</div>
+                </div>
+                <div class="add"><button>+ Paragraph</button><button>+ List</button></div>
+              </div>
+            </div>
+
+            <div class="add"><button>+ Paragraph</button><button>+ List</button><button>+ Section</button><button>+ Only sometimes</button><button>+ Repeats</button></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ SETTINGS ══ -->
+    <section id="settings" hidden>
+      <div class="head"><div><h1>Settings</h1><p>Where reports get written, and how dictation behaves</p></div></div>
+      <div class="body">
+        <div class="set">
+          <div class="group">
+            <h3>Where reports are written</h3>
+            <p class="sub">This decides whether your notes ever leave this computer.</p>
+            <label class="choice on"><span class="r"></span><span><b>On this Mac</b><span>Nothing leaves the device. Slower on long reports.</span></span></label>
+            <label class="choice"><span class="r"></span><span><b>Company server</b><span>Faster. Your notes are sent to the address below.</span></span></label>
+            <label class="choice"><span class="r"></span><span><b>Example text</b><span>Fills the template with placeholder text. For trying things out.</span></span></label>
+            <details class="adv">
+              <summary>Server details</summary>
+              <div class="field"><label>Address</label><input value="https://gateway.ajila.com/v1"></div>
+              <div class="field"><label>Key</label><input type="password" value="••••••••••••••••"></div>
+            </details>
+          </div>
+          <div class="group">
+            <h3>Dictation</h3>
+            <p class="sub">Speech is turned into text on this computer. Recordings are never uploaded.</p>
+            <div class="field"><label>Spoken language</label><input value="Detect automatically"></div>
+          </div>
+          <div class="group">
+            <h3>Files</h3>
+            <p class="sub">Reports and templates live in your application data folder.</p>
+            <button class="btn">Show in Finder</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+  const views = ['reports','editor','template','settings'];
+  function go(id){
+    views.forEach(v => document.getElementById(v).hidden = v !== id);
+    document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('on', a.dataset.go === id));
+  }
+  document.querySelectorAll('[data-go]').forEach(el =>
+    el.addEventListener('click', e => { e.preventDefault(); go(el.dataset.go); }));
+  function toggleTheme(){
+    const r = document.documentElement;
+    r.dataset.theme = r.dataset.theme === 'dark' ? 'light' : 'dark';
+  }
+</script>
+</body>
+</html>
