@@ -174,3 +174,15 @@ The icon set in `app/src/ui/kit/icon.rs` is vendored from [Lucide](https://lucid
 v1.31.0, ISC licensed. The full notice — which ISC requires be kept with the copies — is
 in [`licenses/LICENSE-lucide`](licenses/LICENSE-lucide). Each `match` arm names its
 upstream icon so the set can be refreshed against a later release.
+
+The application icon is built from the same source: Lucide's `notebook-pen`, set in a
+rounded tile. Everything in `app/assets/icons/` is generated —
+
+```sh
+python3 tools/make-icons.py     # needs cairosvg + pillow; iconutil for the .icns
+```
+
+— so changing the mark means editing that script and re-running it rather than editing
+binaries. It writes the two editable `.svg` masters alongside the rasters, and explains
+why the small sizes are not simply the large one scaled down. Because a stock glyph is
+not a distinctive trademark, this is a mark for internal tooling rather than a brand.

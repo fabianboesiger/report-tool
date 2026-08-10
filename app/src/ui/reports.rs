@@ -16,6 +16,7 @@ use dioxus::prelude::*;
 use report_core::store::{self, Summary};
 use report_core::Template;
 
+use crate::ui::confirm;
 use crate::ui::kit::{
     Button, EmptyState, Glyph, Icon, List, Notice, NoticeKind, PageBody, PageHead, Row, Variant,
 };
@@ -199,20 +200,9 @@ fn subtitle(reports: &[Summary]) -> String {
 }
 
 /// Delete a report, once the user has confirmed it.
-///
-/// Confirmed through the platform dialog rather than an in-app one: this is the only
-/// destructive action in the app, it is reached from a hover-revealed button, and there is
-/// no undo behind it. `rfd` is already here for the export dialog.
 fn delete(id: uuid::Uuid, name: String, workspace: Workspace, mut error: Signal<Option<String>>) {
     spawn(async move {
-        let confirmed = rfd::AsyncMessageDialog::new()
-            .set_level(rfd::MessageLevel::Warning)
-            .set_title("Delete report")
-            .set_description(format!("Delete “{name}”? This cannot be undone."))
-            .set_buttons(rfd::MessageButtons::OkCancel)
-            .show()
-            .await;
-        if confirmed != rfd::MessageDialogResult::Ok {
+        if !confirm::destructive("Delete report", &name, confirm::NO_UNDO).await {
             return;
         }
         match store::delete_report(id) {

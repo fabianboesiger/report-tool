@@ -75,7 +75,8 @@ impl Report {
 pub struct Summary {
     pub id: Uuid,
     pub name: String,
-    /// Seconds since the epoch. A report's own stamp; a template's file mtime.
+    /// Seconds since the epoch. A real column for both, since storage moved to SQLite —
+    /// a template's used to be its file's mtime, which any copy or sync rewrote.
     pub updated: u64,
     /// The name of the template *snapshot* the report holds.
     ///
@@ -88,6 +89,12 @@ pub struct Summary {
     /// Whether the report has been generated at least once, shown as Draft or Final.
     /// Always false for a template.
     pub generated: bool,
+    /// How many top-level fields a template has. Always zero for a report.
+    ///
+    /// Here because a template with no fields produces nothing, and several of them
+    /// carry the same default name — so without this the library shows a column of
+    /// identical `Untitled template` rows with no way to tell which one has work in it.
+    pub fields: usize,
 }
 
 pub fn save_template(template: &Template) -> Result<()> {
@@ -121,7 +128,15 @@ pub fn delete_template(id: Uuid) -> Result<()> {
 pub fn list_templates() -> Result<Vec<Summary>> {
     let connection = db::open()?;
     let mut statement = connection
-        .prepare("SELECT id, name, updated FROM templates ORDER BY updated DESC, name ASC")
+        .prepare(
+            // `json_array_length` does read the body, which the report listing is
+            // careful never to do. Acceptable here and not there: a template is a few
+            // kilobytes of structure with no notes and no prose in it, while a report
+            // body is the notes, the generated document *and* a template snapshot.
+            "SELECT id, name, updated, \
+                    coalesce(json_array_length(body, '$.nodes'), 0) \
+             FROM templates ORDER BY updated DESC, name ASC",
+        )
         .context("preparing the template list")?;
 
     let rows = statement
@@ -138,6 +153,7 @@ pub fn list_templates() -> Result<Vec<Summary>> {
                 // A template is its own source, and has nothing to be a draft of.
                 template_name: String::new(),
                 generated: false,
+                fields: row.get::<_, i64>(3)? as usize,
             })
         })
         .context("listing templates")?;
@@ -226,6 +242,8 @@ pub fn list_reports() -> Result<Vec<Summary>> {
                 // `NULL` until the report has been written once, which is exactly the
                 // Draft/Final distinction the library row draws.
                 generated: row.get(4)?,
+                // Only a template is a list of fields; a report is the prose one made.
+                fields: 0,
             })
         })
         .context("listing reports")?;
@@ -429,6 +447,19 @@ mod tests {
         assert_eq!(listed[0].name, "Site Inspection");
         // A real column now, not the file mtime it used to be.
         assert!(listed[0].updated > 0);
+        // The count the library row shows. Counted by SQLite out of the stored body, so
+        // it is worth checking against a template whose fields are known.
+        assert_eq!(listed[0].fields, template.nodes.len());
+
+        // An empty template must report zero rather than failing the projection — that
+        // is the state a just-created template is in, and the state the row marks.
+        let empty = Template::new("Untitled template");
+        assert!(empty.nodes.is_empty(), "a new template starts with no fields");
+        save_template(&empty).unwrap();
+        let all = list_templates().unwrap();
+        let found = all.iter().find(|s| s.id == empty.id).expect("the empty template is listed");
+        assert_eq!(found.fields, 0);
+        delete_template(empty.id).unwrap();
 
         let mut report = Report::new("March visit", template.clone());
         report.notes = report_doc::markdown::from_markdown("north wall cracked");
@@ -528,6 +559,7 @@ mod tests {
             updated,
             template_name: String::new(),
             generated: false,
+            fields: 0,
         };
         let mut summaries = [summary("old", 100), summary("newest", 300), summary("middle", 200)];
         summaries.sort_by(|a, b| b.updated.cmp(&a.updated).then_with(|| a.name.cmp(&b.name)));

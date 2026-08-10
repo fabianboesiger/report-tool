@@ -15,6 +15,7 @@ use report_core::store;
 use report_core::template::{NodeKind, Template, TemplateNode};
 use uuid::Uuid;
 
+use crate::ui::confirm;
 use crate::ui::kit::{
     Button, EmptyState, Icon, List, Notice, NoticeKind, PageBody, PageHead, Row, Variant,
 };
@@ -134,11 +135,24 @@ pub fn TemplatesScreen(template: Signal<Template>) -> Element {
                     icon: Icon::Layout,
                     title: "No templates yet".to_string(),
                     hint: "A template captures the shape of a report once — its headings, their order, and what each part is for. Every report you write from it follows that shape.".to_string(),
+                    // Two buttons, because there were two behaviours behind one label: the
+                    // header's "New template" gives an empty one and this used to give a
+                    // filled-in Site inspection example. Asking for a new template and
+                    // getting somebody else's is a fair thing to call broken.
                     action: rsx! {
                         Button {
                             label: "New template".to_string(),
                             icon: Icon::Plus,
                             variant: Variant::Primary,
+                            onclick: move |_| {
+                                template.set(blank_template());
+                                editing.set(Some(template.read().id));
+                                save();
+                            },
+                        }
+                        Button {
+                            label: "Start from an example".to_string(),
+                            variant: Variant::Normal,
                             onclick: move |_| {
                                 template.set(starter_template());
                                 editing.set(Some(template.read().id));
@@ -153,6 +167,14 @@ pub fn TemplatesScreen(template: Signal<Template>) -> Element {
                         Row {
                             key: "{item.id}",
                             name: item.name.clone(),
+                            // Said in the list rather than only inside the builder: a
+                            // template with no fields generates nothing, and the default
+                            // name means several of them read identically otherwise.
+                            tag: match item.fields {
+                                0 => Some(("Empty".to_string(), true)),
+                                1 => Some(("1 field".to_string(), false)),
+                                count => Some((format!("{count} fields"), false)),
+                            },
                             when: store::relative_time(item.updated),
                             onopen: {
                                 let id = item.id;
@@ -169,11 +191,28 @@ pub fn TemplatesScreen(template: Signal<Template>) -> Element {
                             },
                             ondelete: {
                                 let id = item.id;
-                                move |_| match store::delete_template(id) {
-                                    Ok(()) => revision.with_mut(|count| *count += 1),
-                                    Err(error) => {
-                                        message.set(Some((NoticeKind::Error, format!("{error:#}"))))
-                                    }
+                                let name = item.name.clone();
+                                move |_| {
+                                    let name = name.clone();
+                                    spawn(async move {
+                                        if !confirm::destructive(
+                                            "Delete template",
+                                            &name,
+                                            "Reports already written from it keep their own \
+                                             copy and are unaffected.",
+                                        )
+                                        .await
+                                        {
+                                            return;
+                                        }
+                                        match store::delete_template(id) {
+                                            Ok(()) => revision.with_mut(|count| *count += 1),
+                                            Err(error) => message.set(Some((
+                                                NoticeKind::Error,
+                                                format!("{error:#}"),
+                                            ))),
+                                        }
+                                    });
                                 }
                             },
                         }

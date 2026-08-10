@@ -14,7 +14,7 @@ pub fn Rail(screen: Signal<Screen>, settings: Signal<Settings>) -> Element {
     rsx! {
         aside { class: "rail",
             div { class: "brand",
-                Glyph { icon: Icon::Aperture }
+                Glyph { icon: Icon::Brand }
                 "Report tool"
             }
 
@@ -95,9 +95,8 @@ mod tests {
 
     #[test]
     fn the_privacy_line_names_where_the_notes_go() {
-        let mut settings = Settings::default();
+        let mut settings = Settings { provider: Provider::Local, ..Default::default() };
 
-        settings.provider = Provider::Local;
         assert_eq!(where_line(Provider::Local, &settings).0, "Writing on this computer");
 
         settings.provider = Provider::Remote;

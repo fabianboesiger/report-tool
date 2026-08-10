@@ -66,20 +66,6 @@ impl LlmBackend for LocalBackend {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_description_names_the_model_file_not_its_whole_path() {
-        let backend = LocalBackend::new(
-            PathBuf::from("/Users/someone/Library/Application Support/models/llm/qwen.gguf"),
-            8192,
-        );
-        assert_eq!(backend.describe(), "local · qwen.gguf");
-    }
-}
-
 /// Transcribe 16 kHz mono audio through the STT worker.
 ///
 /// A free function rather than a trait implementation: transcription has one
@@ -105,4 +91,18 @@ pub async fn transcribe(
             }
         })
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_description_names_the_model_file_not_its_whole_path() {
+        let backend = LocalBackend::new(
+            PathBuf::from("/Users/someone/Library/Application Support/models/llm/qwen.gguf"),
+            8192,
+        );
+        assert_eq!(backend.describe(), "local · qwen.gguf");
+    }
 }

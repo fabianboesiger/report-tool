@@ -227,6 +227,13 @@ input, textarea { font: inherit; color: inherit; }
 .btn-quiet { border-color: transparent; color: var(--muted); background: none; }
 .btn-quiet:hover:not(:disabled) { background: var(--sunk); color: var(--text); border-color: transparent; }
 
+/* Shown only while a template has no fields, so the dashed buttons below it read as the
+   next step rather than as decoration. */
+.tpl-hint {
+  margin: 2px 0 10px; max-width: 52ch;
+  font-size: 13px; color: var(--muted); line-height: 1.6;
+}
+
 /* The add-a-field buttons in the template outline: dashed, so they read as a slot
    waiting to be filled rather than as an action already available. */
 .btn-ghost {
@@ -515,6 +522,9 @@ input, textarea { font: inherit; color: inherit; }
 .empty svg { width: 22px; height: 22px; color: var(--faint); margin-bottom: 14px; }
 .empty h2 { margin: 0 0 6px; font-size: 15px; font-weight: 600; color: var(--ink); }
 .empty p { margin: 0 0 18px; font-size: 13px; color: var(--muted); line-height: 1.6; }
+/* An empty state may offer two ways in — a blank one, or the worked example — which the
+   single-button version did not need to space. */
+.empty button + button { margin-left: 8px; }
 
 /* --- developer ------------------------------------------------------------
  * The prompt and schema views, which used to occupy half the window. Kept because a

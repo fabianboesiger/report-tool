@@ -4305,6 +4305,7 @@ dependencies = [
  "anyhow",
  "cpal",
  "dioxus",
+ "png 0.18.1",
  "report-core",
  "report-doc",
  "report-editor",

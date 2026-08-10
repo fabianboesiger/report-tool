@@ -27,6 +27,7 @@ use report_core::template::{NodeId, NodeKind, Template, TemplateNode};
 use report_doc::{BlockId, Span};
 use report_editor::{use_bridge, EditableText, Focus, RawEvent};
 
+use crate::ui::confirm;
 use crate::ui::kit::{Button, Icon, IconButton, NumberField, Variant};
 
 /// A template node's identity as the editor addresses it.
@@ -91,14 +92,30 @@ fn NodeList(
     nodes: Vec<TemplateNode>,
     depth: u8,
 ) -> Element {
+    // A new template has no fields at all, and the outline was then five dashed buttons
+    // under two empty inputs — indistinguishable from a screen where nothing happened.
+    // Saying what a template *is* turns the same buttons into an obvious next step.
+    let explain_first_field = nodes.is_empty() && parent.is_none();
+
     rsx! {
         div { class: "tpl-list",
             for node in nodes.iter() {
                 NodeCard { key: "{node.id}", template, focus, node: node.clone(), depth }
             }
+            if explain_first_field {
+                p { class: "tpl-hint",
+                    "A template is a list of fields. Each one becomes a part of the report, and \
+                     what you write in it tells the model what belongs there. Add the first:"
+                }
+            }
             AddRow { template, parent }
         }
     }
+}
+
+/// How many fields a delete would take along, at any depth.
+fn count_nested(children: &[TemplateNode]) -> usize {
+    children.iter().map(|child| 1 + child.kind.children().map_or(0, count_nested)).sum()
 }
 
 #[component]
@@ -147,7 +164,31 @@ fn NodeCard(
                     IconButton {
                         icon: Icon::Close,
                         title: "Delete this field and everything in it".to_string(),
-                        onclick: move |_| { template.write().remove(id); },
+                        onclick: {
+                            // A container takes its children with it, and the button is a
+                            // small × next to two harmless move buttons. The count goes in
+                            // the message because that is the part nobody sees coming.
+                            let label = node.label.clone();
+                            let nested = node.kind.children().map_or(0, count_nested);
+                            move |_| {
+                                let label = label.clone();
+                                spawn(async move {
+                                    let named = if label.trim().is_empty() {
+                                        "this field".to_string()
+                                    } else {
+                                        label.clone()
+                                    };
+                                    let consequence = match nested {
+                                        0 => confirm::NO_UNDO.to_string(),
+                                        1 => format!("The field inside it goes too. {}", confirm::NO_UNDO),
+                                        n => format!("The {n} fields inside it go too. {}", confirm::NO_UNDO),
+                                    };
+                                    if confirm::destructive("Delete field", &named, &consequence).await {
+                                        template.write().remove(id);
+                                    }
+                                });
+                            }
+                        },
                     }
                 }
             }
@@ -374,6 +415,44 @@ fn placeholder(kind: &NodeKind) -> String {
     .to_string()
 }
 
+fn handle(event: RawEvent, mut template: Signal<Template>, mut focus: Signal<Focus>) {
+    let block = event.block();
+    let node = node_id(block);
+    // Every editing surface sees every event, so each has to recognise its own. A
+    // block id that is not a node in this template belongs to the notes or report
+    // pane instead.
+    if template.read().find(node).is_none() {
+        return;
+    }
+
+    match event {
+        // A description is a plain instruction, so any inline formatting the browser
+        // produced is dropped rather than stored and silently lost on save.
+        RawEvent::Input { html, .. } => {
+            let text = plain_text(&html);
+            template.write().set_description(node, text);
+        }
+        RawEvent::Blur { html, .. } => {
+            let text = plain_text(&html);
+            template.write().set_description(node, text);
+            focus.write().leave(block);
+        }
+        RawEvent::Focus { .. } => {
+            let description = template.read().find(node).map(|n| n.description().to_string());
+            if let Some(description) = description {
+                focus.write().enter(block, &[Span::plain(description)]);
+            }
+        }
+        // Enter, Tab and the mark shortcuts have no meaning in a one-line
+        // instruction; leaving them unhandled is what makes them no-ops.
+        _ => {}
+    }
+}
+
+fn plain_text(html: &str) -> String {
+    report_doc::html::html_to_spans(html).iter().map(|span| span.text.as_str()).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -432,42 +511,4 @@ mod tests {
         );
         assert_eq!(deep, format!("as-h{}", report_doc::BlockKind::MAX_HEADING_LEVEL));
     }
-}
-
-fn handle(event: RawEvent, mut template: Signal<Template>, mut focus: Signal<Focus>) {
-    let block = event.block();
-    let node = node_id(block);
-    // Every editing surface sees every event, so each has to recognise its own. A
-    // block id that is not a node in this template belongs to the notes or report
-    // pane instead.
-    if template.read().find(node).is_none() {
-        return;
-    }
-
-    match event {
-        // A description is a plain instruction, so any inline formatting the browser
-        // produced is dropped rather than stored and silently lost on save.
-        RawEvent::Input { html, .. } => {
-            let text = plain_text(&html);
-            template.write().set_description(node, text);
-        }
-        RawEvent::Blur { html, .. } => {
-            let text = plain_text(&html);
-            template.write().set_description(node, text);
-            focus.write().leave(block);
-        }
-        RawEvent::Focus { .. } => {
-            let description = template.read().find(node).map(|n| n.description().to_string());
-            if let Some(description) = description {
-                focus.write().enter(block, &[Span::plain(description)]);
-            }
-        }
-        // Enter, Tab and the mark shortcuts have no meaning in a one-line
-        // instruction; leaving them unhandled is what makes them no-ops.
-        _ => {}
-    }
-}
-
-fn plain_text(html: &str) -> String {
-    report_doc::html::html_to_spans(html).iter().map(|span| span.text.as_str()).collect()
 }

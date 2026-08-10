@@ -3,6 +3,7 @@
 //! [`kit`] is the exception and the reason the rest reads cleanly — it holds the shared
 //! Aperture pieces and is forbidden from knowing any of those types.
 
+pub mod confirm;
 pub mod editor;
 pub mod kit;
 pub mod rail;

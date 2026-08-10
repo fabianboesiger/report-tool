@@ -47,8 +47,12 @@ use dioxus::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Icon {
-    /// The brand mark. Lucide `aperture`.
-    Aperture,
+    /// The brand mark. Lucide `notebook-pen`.
+    ///
+    /// The same glyph the app icon is built from — see `tools/make-icons.py`. It replaced
+    /// `aperture`, a camera diaphragm that said nothing about writing and collapsed into a
+    /// grey disc at 16px.
+    Brand,
     /// Lucide `file-text`.
     Document,
     /// Lucide `pencil`.
@@ -83,7 +87,7 @@ impl Icon {
     /// variants by name.
     #[cfg(test)]
     pub const ALL: [Icon; 14] = [
-        Icon::Aperture,
+        Icon::Brand,
         Icon::Document,
         Icon::Pencil,
         Icon::Layout,
@@ -105,9 +109,9 @@ impl Icon {
     /// extra hash leaves room for a future path that does.
     fn body(self) -> &'static str {
         match self {
-            // lucide `aperture`
-            Icon::Aperture => {
-                r##"<circle cx="12" cy="12" r="10"/> <path d="m14.31 8 5.74 9.94"/> <path d="M9.69 8h11.48"/> <path d="m7.38 12 5.74-9.94"/> <path d="M9.69 16 3.95 6.06"/> <path d="M14.31 16H2.83"/> <path d="m16.62 12-5.74 9.94"/>"##
+            // lucide `notebook-pen`
+            Icon::Brand => {
+                r##"<path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"/> <path d="M2 6h4"/> <path d="M2 10h4"/> <path d="M2 14h4"/> <path d="M2 18h4"/> <path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"/>"##
             }
             // lucide `file-text`
             Icon::Document => {
