@@ -22,6 +22,8 @@ use report_core::Template;
 use report_doc::{markdown::to_markdown, RichDoc};
 use uuid::Uuid;
 
+use crate::i18n::t;
+
 /// Everything the library reads and writes.
 ///
 /// All fields are `Signal`s, so this is `Copy` and stays valid across renders — the same
@@ -91,37 +93,64 @@ impl Workspace {
     /// is what lets [`use_autosave`] be a pure update, and it removes the only question
     /// autosave would otherwise have to answer — whether an untouched, unnamed workspace
     /// deserves to exist on disk. The answer was always ambiguous; this makes it moot.
-    pub fn new_report(&self, template: Template) -> anyhow::Result<()> {
+    /// `name` is the placeholder the report opens with — passed in rather than chosen here,
+    /// because it is translated and this module has no i18n context to translate from. See
+    /// `crate::i18n`.
+    pub fn new_report(&self, template: Template, name: String) -> anyhow::Result<()> {
         self.template.clone().set(template);
         self.notes.clone().set(RichDoc::empty_paragraph());
         self.generated.clone().set(RichDoc::empty_paragraph());
         self.has_report.clone().set(false);
         self.written_at.clone().set(None);
         self.report_id.clone().set(None);
-        self.report_name.clone().set("Untitled report".to_string());
+        self.report_name.clone().set(name);
         self.save_report()
     }
 }
 
 /// What autosave last did, for the head's subtitle.
+///
+/// A value, not a message: autosave runs inside a spawned task and the words belong to
+/// whichever language the app is in, so the component turns this into text when it draws it.
 #[derive(Clone, PartialEq)]
 pub enum SaveState {
     Saved,
     Saving,
+    /// The whole error chain. Still English — `report-core`'s diagnostics are out of scope
+    /// for translation — but the sentence around it is not.
     Failed(String),
 }
 
 impl SaveState {
-    pub fn message(&self) -> &str {
+    pub fn message(&self) -> String {
         match self {
-            SaveState::Saved => "saved automatically",
-            SaveState::Saving => "saving…",
-            SaveState::Failed(error) => error,
+            SaveState::Saved => t!("workspace-saved-automatically"),
+            SaveState::Saving => t!("workspace-saving"),
+            SaveState::Failed(error) => t!("workspace-save-failed", error: error.as_str()),
         }
     }
 
     pub fn is_failed(&self) -> bool {
         matches!(self, SaveState::Failed(_))
+    }
+}
+
+/// How an export finished, for the notice under the split.
+///
+/// Same reason as [`SaveState`]: the file dialog is `async`, so the outcome arrives where
+/// there is no context to translate in.
+#[derive(Clone, PartialEq)]
+pub enum Exported {
+    To(String),
+    Failed(String),
+}
+
+impl Exported {
+    pub fn message(&self) -> String {
+        match self {
+            Exported::To(file) => t!("workspace-exported", file: file.as_str()),
+            Exported::Failed(error) => t!("workspace-export-failed", error: error.as_str()),
+        }
     }
 }
 
@@ -189,8 +218,10 @@ pub fn use_autosave(workspace: Workspace) -> Signal<SaveState> {
 }
 
 /// Write the generated report to a file the user picks.
-pub fn export(workspace: Workspace, mut status: Signal<Option<String>>) {
+pub fn export(workspace: Workspace, mut status: Signal<Option<Exported>>) {
     let markdown = to_markdown(&workspace.generated.read());
+    // From the report's name, which is the user's own text — never from a `t!` result, which
+    // Fluent would have wrapped in invisible bidi isolates.
     let suggested = format!("{}.md", slug(&workspace.report_name.read()));
 
     spawn(async move {
@@ -204,8 +235,8 @@ pub fn export(workspace: Workspace, mut status: Signal<Option<String>>) {
             return;
         };
         match file.write(markdown.as_bytes()).await {
-            Ok(()) => status.set(Some(format!("Exported to {}", file.file_name()))),
-            Err(error) => status.set(Some(format!("Export failed: {error}"))),
+            Ok(()) => status.set(Some(Exported::To(file.file_name()))),
+            Err(error) => status.set(Some(Exported::Failed(format!("{error}")))),
         }
     });
 }

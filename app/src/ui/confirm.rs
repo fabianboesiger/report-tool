@@ -9,6 +9,10 @@
 //! The platform dialog rather than an in-app one: it is modal in the way an in-app panel is
 //! not, it names the app, and `rfd` is already a dependency for the export and import
 //! dialogs. The cost is that it is `async`, so callers spawn.
+//!
+//! Every caller therefore translates its three strings *before* it spawns — `confirm-no-undo`
+//! is the consequence most of them pass — because `t!` needs the component's context and a
+//! spawned task past an `await` no longer has one.
 
 /// Ask, and report whether the user agreed.
 ///
@@ -25,9 +29,3 @@ pub async fn destructive(action: &str, subject: &str, consequence: &str) -> bool
         .await;
     result == rfd::MessageDialogResult::Ok
 }
-
-/// The sentence every one of these ends with.
-///
-/// A constant rather than repeated at each call site, so it cannot drift into three
-/// slightly different promises about the same absence of undo.
-pub const NO_UNDO: &str = "This cannot be undone.";

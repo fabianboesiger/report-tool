@@ -302,16 +302,38 @@ pub fn now() -> u64 {
         .unwrap_or(0)
 }
 
-/// A timestamp as a person would say it: "2 hours ago", "Yesterday", "4 Aug".
+/// How long ago something happened, as a person would say it.
+///
+/// A value rather than a string, because the words belong to whichever language the app
+/// is in and this crate never links the UI — see `app/src/i18n.rs`, which turns each
+/// variant into "vor 2 Stunden" or "hier" through the Fluent catalogue and gets correct
+/// plural forms for free. What stays here is the arithmetic and the boundaries, which
+/// are the same in every language.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Elapsed {
+    /// Under a minute.
+    JustNow,
+    Minutes(u64),
+    Hours(u64),
+    Yesterday,
+    /// Day of the month, and the month as a 1-based number. **UTC, not local time** —
+    /// see [`civil_date`].
+    Date {
+        day: u32,
+        month: u32,
+    },
+}
+
+/// How long ago `when` was.
 ///
 /// Here rather than in the app for the same reason [`crate::download::human_bytes`] is:
-/// it formats a value this module produces, and a pure function is worth more in the
+/// it interprets a value this module produces, and a pure function is worth more in the
 /// fast test job than beside the component that happens to draw it.
 ///
 /// Switches from elapsed time to a date at two days, which is where "47 hours ago" stops
 /// being easier to read than the date itself.
-pub fn relative_time(when: u64) -> String {
-    relative_to(when, now())
+pub fn elapsed_since(when: u64) -> Elapsed {
+    elapsed_between(when, now())
 }
 
 /// The same, against an explicit clock.
@@ -319,7 +341,7 @@ pub fn relative_time(when: u64) -> String {
 /// Split out purely so it can be tested: a function that reads the wall clock can be
 /// checked for shape and never for a value, and every interesting case here is about
 /// exactly where a boundary falls.
-pub fn relative_to(when: u64, now: u64) -> String {
+pub fn elapsed_between(when: u64, now: u64) -> Elapsed {
     const MINUTE: u64 = 60;
     const HOUR: u64 = 60 * MINUTE;
     const DAY: u64 = 24 * HOUR;
@@ -327,23 +349,18 @@ pub fn relative_to(when: u64, now: u64) -> String {
     // Saturating: a report copied from a machine whose clock runs ahead would otherwise
     // wrap and the row would read "584942417355 years ago".
     match now.saturating_sub(when) {
-        elapsed if elapsed < MINUTE => "Just now".to_string(),
-        elapsed if elapsed < HOUR => plural(elapsed / MINUTE, "minute"),
-        elapsed if elapsed < DAY => plural(elapsed / HOUR, "hour"),
-        elapsed if elapsed < 2 * DAY => "Yesterday".to_string(),
-        _ => short_date(when),
+        elapsed if elapsed < MINUTE => Elapsed::JustNow,
+        elapsed if elapsed < HOUR => Elapsed::Minutes(elapsed / MINUTE),
+        elapsed if elapsed < DAY => Elapsed::Hours(elapsed / HOUR),
+        elapsed if elapsed < 2 * DAY => Elapsed::Yesterday,
+        _ => {
+            let (day, month) = civil_date(when);
+            Elapsed::Date { day, month }
+        }
     }
 }
 
-fn plural(count: u64, unit: &str) -> String {
-    if count == 1 {
-        format!("1 {unit} ago")
-    } else {
-        format!("{count} {unit}s ago")
-    }
-}
-
-/// "4 Aug", from a unix timestamp, without a date crate.
+/// Day and month from a unix timestamp, without a date crate.
 ///
 /// Hinnant's `civil_from_days`: shifting the epoch to 1 March puts a leap day at the end
 /// of the year, after which every month has a closed-form length. A dozen lines, exact
@@ -354,10 +371,7 @@ fn plural(count: u64, unit: &str) -> String {
 /// database — the `time` crate, or `libc::localtime_r` — and this is a six-character
 /// label on a row that also carries a name; it is not worth a dependency, and it is
 /// worth saying out loud rather than leaving as a puzzle.
-fn short_date(when: u64) -> String {
-    const MONTHS: [&str; 12] =
-        ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
+fn civil_date(when: u64) -> (u32, u32) {
     let days = (when / 86_400) as i64;
     // Shift the era to start on 1 March 0000, so February — and its leap day — is the
     // last month of the year rather than the second.
@@ -368,12 +382,12 @@ fn short_date(when: u64) -> String {
         (day_of_era - day_of_era / 1460 + day_of_era / 36524 - day_of_era / 146_096) / 365;
     let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let shifted_month = (5 * day_of_year + 2) / 153;
-    let day = (day_of_year - (153 * shifted_month + 2) / 5 + 1) as usize;
+    let day = (day_of_year - (153 * shifted_month + 2) / 5 + 1) as u32;
     // Undo the March shift: months 0..=9 are March..December, 10 and 11 are January and
     // February of the following year.
-    let month = if shifted_month < 10 { shifted_month + 3 } else { shifted_month - 9 } as usize;
+    let month = if shifted_month < 10 { shifted_month + 3 } else { shifted_month - 9 } as u32;
 
-    format!("{day} {}", MONTHS[month - 1])
+    (day, month)
 }
 
 #[cfg(test)]
@@ -570,22 +584,22 @@ mod tests {
     }
 
     #[test]
-    fn a_timestamp_reads_the_way_a_person_would_say_it() {
+    fn a_timestamp_falls_on_the_side_of_the_boundary_a_person_would_expect() {
         const HOUR: u64 = 3600;
         const DAY: u64 = 24 * HOUR;
         // A fixed clock, so this cannot start failing next Tuesday.
         let now = 1_754_308_800; // 2025-08-04 12:00 UTC
 
-        assert_eq!(relative_to(now, now), "Just now");
-        assert_eq!(relative_to(now - 90, now), "1 minute ago");
-        assert_eq!(relative_to(now - 45 * 60, now), "45 minutes ago");
-        assert_eq!(relative_to(now - 2 * HOUR, now), "2 hours ago");
-        // "1 hours ago" is the sort of thing nobody notices until a screenshot.
-        assert_eq!(relative_to(now - HOUR - 1, now), "1 hour ago");
+        assert_eq!(elapsed_between(now, now), Elapsed::JustNow);
+        assert_eq!(elapsed_between(now - 90, now), Elapsed::Minutes(1));
+        assert_eq!(elapsed_between(now - 45 * 60, now), Elapsed::Minutes(45));
+        assert_eq!(elapsed_between(now - 2 * HOUR, now), Elapsed::Hours(2));
+        // One second past the hour is one hour, not sixty minutes.
+        assert_eq!(elapsed_between(now - HOUR - 1, now), Elapsed::Hours(1));
         // The boundary: still yesterday at 30 hours, a date by 50.
-        assert_eq!(relative_to(now - 30 * HOUR, now), "Yesterday");
-        assert_eq!(relative_to(now - 50 * HOUR, now), "2 Aug");
-        assert_eq!(relative_to(now - 14 * DAY, now), "21 Jul");
+        assert_eq!(elapsed_between(now - 30 * HOUR, now), Elapsed::Yesterday);
+        assert_eq!(elapsed_between(now - 50 * HOUR, now), Elapsed::Date { day: 2, month: 8 });
+        assert_eq!(elapsed_between(now - 14 * DAY, now), Elapsed::Date { day: 21, month: 7 });
     }
 
     #[test]
@@ -593,17 +607,22 @@ mod tests {
         // A report copied from a machine ahead of this one. Unsaturated, `now - when`
         // wraps and the row reads "584942417355 years ago".
         let now = 1_754_308_800;
-        assert_eq!(relative_to(now + 3600, now), "Just now");
+        assert_eq!(elapsed_between(now + 3600, now), Elapsed::JustNow);
     }
 
     #[test]
-    fn the_short_date_survives_a_leap_day_and_the_epoch() {
+    fn the_civil_date_survives_a_leap_day_and_the_epoch() {
         // The whole reason for the March-shifted era: 2024 is a leap year, and 29
         // February is the day a naive month-length table gets wrong.
-        assert_eq!(short_date(1_709_164_800), "29 Feb"); // 2024-02-29 00:00 UTC
-        assert_eq!(short_date(1_709_251_200), "1 Mar"); // the day after
-        assert_eq!(short_date(0), "1 Jan"); // 1970-01-01
-        assert_eq!(short_date(951_782_400), "29 Feb"); // 2000, a century leap year
-        assert_eq!(short_date(1_078_012_800), "29 Feb"); // 2004
+        assert_eq!(civil_date(1_709_164_800), (29, 2)); // 2024-02-29 00:00 UTC
+        assert_eq!(civil_date(1_709_251_200), (1, 3)); // the day after
+        assert_eq!(civil_date(0), (1, 1)); // 1970-01-01
+        assert_eq!(civil_date(951_782_400), (29, 2)); // 2000, a century leap year
+        assert_eq!(civil_date(1_078_012_800), (29, 2)); // 2004
+
+        // The month is 1-based, which is what the `time-month-N` catalogue keys index
+        // from; an off-by-one here would name every month as its predecessor.
+        assert_eq!(civil_date(1_767_225_600), (1, 1)); // 2026-01-01
+        assert_eq!(civil_date(1_766_534_400), (24, 12)); // 2025-12-24
     }
 }

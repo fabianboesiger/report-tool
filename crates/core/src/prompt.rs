@@ -18,6 +18,7 @@
 use std::fmt::Write as _;
 
 use crate::compile::{Field, Shape, HEADING_KEY};
+use crate::settings::Locale;
 use crate::template::Template;
 
 /// The instructions given to the model, independent of any particular notes.
@@ -25,16 +26,32 @@ use crate::template::Template;
 /// Kept free of the notes on purpose: it is byte-identical across regenerations and
 /// across every report made from one template, which is exactly what the local
 /// backend's KV-cache prefix reuse rewards — a second generation reuses the whole
-/// prefix and skips straight to the notes.
-pub fn system(template: &Template) -> String {
+/// prefix and skips straight to the notes. `locale` does not compromise that: it comes
+/// from the settings and changes only when the user changes it.
+///
+/// ## Everything here stays English, except the language named
+///
+/// The rules, the field guide and the count hints are instructions to the model, not
+/// copy for a person, and an instruction that stays in one language is the one that
+/// reliably lands. What *is* stated outright is the language to write in — previously
+/// left to the model to infer from the notes, which quietly made the report language a
+/// property of how someone happened to dictate rather than a setting they chose.
+pub fn system(template: &Template, locale: Locale) -> String {
     let mut s = String::new();
     s.push_str(
         "You write structured reports from a practitioner's rough notes.\n\n\
          Rules:\n\
          - Use only what the notes support. Never invent findings, measurements, names or dates.\n\
-         - Where the notes are silent on a field, say so plainly or keep it brief; do not pad.\n\
-         - Write in the same language as the notes.\n\
-         - Write prose only. Do not write headings, numbering or bullet markers: the surrounding \
+         - Where the notes are silent on a field, say so plainly or keep it brief; do not pad.\n",
+    );
+    let _ = writeln!(
+        s,
+        "- Write the report in {}, whatever language the notes are in. Translate where you \
+         must, but never translate a proper name, a product name or a measurement.",
+        locale.in_english()
+    );
+    s.push_str(
+        "- Write prose only. Do not write headings, numbering or bullet markers: the surrounding \
            document structure is added afterwards, and anything you add would be duplicated.\n\
          - You may use **bold** and _italic_ within a passage where it genuinely aids reading.\n\n",
     );
@@ -188,7 +205,7 @@ mod tests {
         // This is the only route a description has to a locally-generated report:
         // GBNF cannot carry them, so anything missing here is invisible to the model.
         let template = fixture::template();
-        let prompt = system(&template);
+        let prompt = system(&template, Locale::English);
         for (node, _) in template.walk() {
             let description = node.description();
             assert!(
@@ -235,8 +252,42 @@ mod tests {
     fn the_prompt_forbids_the_structure_the_renderer_supplies() {
         // A model that writes its own headings would have them rendered inside a
         // paragraph, duplicating the heading the template already produces.
-        let prompt = system(&fixture::template());
+        let prompt = system(&fixture::template(), Locale::English);
         assert!(prompt.contains("Do not write headings"));
+    }
+
+    #[test]
+    fn the_prompt_names_the_language_to_write_in() {
+        // The report language is a setting now, not something the model infers from how
+        // the notes happen to be dictated. Every locale must reach the prompt under a
+        // name a model recognises, and it must say so in English along with everything
+        // else — a German instruction to write German is the arrangement that goes wrong.
+        for locale in Locale::ALL {
+            let prompt = system(&fixture::template(), locale);
+            assert!(
+                prompt.contains(&format!("Write the report in {}", locale.in_english())),
+                "{locale:?} is not named in the prompt:\n{prompt}"
+            );
+        }
+
+        // And the instruction it replaced must be gone: leaving both in would ask the
+        // model to follow the notes and the setting at the same time.
+        let prompt = system(&fixture::template(), Locale::French);
+        assert!(!prompt.contains("same language as the notes"), "{prompt}");
+    }
+
+    #[test]
+    fn the_prompt_changes_with_the_language_and_nothing_else() {
+        // The line above is the whole difference: if a locale leaked into the field guide
+        // or the rules, prompt work done against one language would not carry to another.
+        let template = fixture::template();
+        let english = system(&template, Locale::English);
+        let italian = system(&template, Locale::Italian);
+        assert_eq!(
+            english.replace("in English,", "in Italian,"),
+            italian,
+            "only the language line may differ"
+        );
     }
 
     #[test]
@@ -244,7 +295,7 @@ mod tests {
         // Byte-identical prompts are what let the local backend reuse its KV cache
         // on a regeneration; any variation here silently costs a full prefill.
         let template = fixture::template();
-        assert_eq!(system(&template), system(&template));
+        assert_eq!(system(&template, Locale::German), system(&template, Locale::German));
     }
 
     #[test]
@@ -252,14 +303,14 @@ mod tests {
         // The notes belong in the user turn: keeping them out is what makes the
         // prefix reusable across every report built from one template.
         let template = fixture::template();
-        let prompt = system(&template);
+        let prompt = system(&template, Locale::English);
         assert!(!prompt.contains("Notes:"));
         assert!(user("some notes").contains("some notes"));
     }
 
     #[test]
     fn an_empty_template_still_produces_a_coherent_prompt() {
-        let prompt = system(&Template::new("Blank"));
+        let prompt = system(&Template::new("Blank"), Locale::English);
         assert!(prompt.contains("no fields yet"), "{prompt}");
     }
 

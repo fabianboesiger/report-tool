@@ -10,6 +10,7 @@
 use dioxus::prelude::*;
 use report_core::catalog::{self, ModelSpec};
 
+use crate::i18n::t;
 use crate::ui::kit::{Banner, Bar};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -49,20 +50,35 @@ impl ModelStatus {
         }
     }
 
+    /// The byte counts a fetch has to show, already humanised.
+    ///
+    /// Split out from [`ModelStatus::detail`] so the arithmetic stays testable: `detail`
+    /// translates, and a translating function can only be exercised inside a running app.
+    fn bytes(&self) -> Option<(String, Option<String>)> {
+        match self.stage {
+            Stage::Fetching { downloaded, total } => Some((
+                report_core::download::human_bytes(downloaded),
+                total.map(report_core::download::human_bytes),
+            )),
+            _ => None,
+        }
+    }
+
     pub fn detail(&self) -> String {
         match &self.stage {
-            Stage::Waiting => "waiting".to_string(),
-            Stage::Fetching { downloaded, total } => match total {
-                Some(total) => format!(
-                    "{} of {}",
-                    report_core::download::human_bytes(*downloaded),
-                    report_core::download::human_bytes(*total)
-                ),
-                None => report_core::download::human_bytes(*downloaded),
+            Stage::Waiting => t!("models-stage-waiting"),
+            Stage::Fetching { .. } => match self.bytes() {
+                Some((done, Some(total))) => {
+                    t!("models-stage-fetching", done: done.as_str(), total: total.as_str())
+                }
+                // An unknown total: the count alone, rather than a sentence with a hole in it.
+                Some((done, None)) => done,
+                None => String::new(),
             },
-            Stage::Ready => "ready".to_string(),
+            Stage::Ready => t!("models-stage-ready"),
+            // `report-core`'s own words, still English: a download failure is a diagnostic.
             Stage::Failed(error) => error.clone(),
-            Stage::Configured => "using the path from Settings".to_string(),
+            Stage::Configured => t!("models-stage-configured"),
         }
     }
 }
@@ -215,7 +231,7 @@ pub fn ModelBanner(statuses: Signal<Vec<ModelStatus>>) -> Element {
             Banner {
                 key: "{status.name}",
                 warn: matches!(status.stage, Stage::Failed(_)),
-                span { "Preparing {status.name} — {status.detail()}" }
+                span { {t!("models-preparing", name: status.name, detail: status.detail())} }
                 // An unknown total still shows movement rather than an empty bar that
                 // looks stuck.
                 Bar { fraction: status.fraction() }
@@ -223,7 +239,7 @@ pub fn ModelBanner(statuses: Signal<Vec<ModelStatus>>) -> Element {
                     // Which is the point of fetching the small one first: dictation lands
                     // in about a minute, so notes can be taken while the report model is
                     // still arriving.
-                    "You can keep taking notes"
+                    {t!("models-keep-taking-notes")}
                 }
             }
         }
@@ -262,15 +278,20 @@ mod tests {
 
     #[test]
     fn the_detail_line_reads_as_a_download_should() {
+        // The counts, not the sentence around them: `detail` translates, and the wording is
+        // pinned by the catalogue tests in `crate::i18n` instead.
         assert_eq!(
             status(Stage::Fetching { downloaded: 2_100_000_000, total: Some(5_150_000_000) })
-                .detail(),
-            "2.1 GB of 5.2 GB"
+                .bytes(),
+            Some(("2.1 GB".to_string(), Some("5.2 GB".to_string())))
         );
+        // An unknown total has to stay unknown rather than becoming a zero to divide by.
         assert_eq!(
-            status(Stage::Fetching { downloaded: 574_000_000, total: None }).detail(),
-            "574 MB"
+            status(Stage::Fetching { downloaded: 574_000_000, total: None }).bytes(),
+            Some(("574 MB".to_string(), None))
         );
+        // Nothing to show for a stage that is not a transfer.
+        assert_eq!(status(Stage::Ready).bytes(), None);
     }
 
     #[test]

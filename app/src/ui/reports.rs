@@ -16,6 +16,7 @@ use dioxus::prelude::*;
 use report_core::store::{self, Summary};
 use report_core::Template;
 
+use crate::i18n::{self, t};
 use crate::ui::confirm;
 use crate::ui::kit::{
     Button, EmptyState, Glyph, Icon, List, Notice, NoticeKind, PageBody, PageHead, Row, Variant,
@@ -59,12 +60,16 @@ pub fn ReportsScreen(
         Err(problem) => error.set(Some(format!("{problem:#}"))),
     });
 
-    let create = use_callback(move |template: Template| match workspace.new_report(template) {
-        Ok(()) => {
-            error.set(None);
-            screen.set(Screen::Editor);
+    // The name is passed in rather than looked up in `new_report`, so translating it stays on
+    // the render path: `Workspace` is in a module with no i18n context to consume.
+    let create = use_callback(move |template: Template| {
+        match workspace.new_report(template, t!("workspace-untitled-report")) {
+            Ok(()) => {
+                error.set(None);
+                screen.set(Screen::Editor);
+            }
+            Err(problem) => error.set(Some(format!("{problem:#}"))),
         }
-        Err(problem) => error.set(Some(format!("{problem:#}"))),
     });
 
     // Offer the choice, or skip straight past it when there is nothing to choose.
@@ -99,10 +104,8 @@ pub fn ReportsScreen(
         return rsx! {
             TemplatePicker {
                 templates,
-                title: "Start a report".to_string(),
-                subtitle: "Which template should it follow? The report keeps a copy, so \
-                           editing the template later will not change this report."
-                    .to_string(),
+                title: t!("reports-start-title"),
+                subtitle: t!("reports-start-subtitle"),
                 allow_none: true,
                 on_pick: move |template| {
                     choosing.set(None);
@@ -115,18 +118,18 @@ pub fn ReportsScreen(
 
     rsx! {
         PageHead {
-            title: "Reports".to_string(),
+            title: t!("reports-title"),
             subtitle: subtitle(&all),
             actions: rsx! {
                 if !all.is_empty() {
                     SearchField {
                         value: query(),
-                        placeholder: "Search reports".to_string(),
+                        placeholder: t!("reports-search"),
                         oninput: move |text| query.set(text),
                     }
                 }
                 Button {
-                    label: "New report".to_string(),
+                    label: t!("reports-new"),
                     icon: Icon::Plus,
                     variant: Variant::Primary,
                     onclick: move |_| begin.call(starter_head.clone()),
@@ -142,11 +145,11 @@ pub fn ReportsScreen(
             if all.is_empty() {
                 EmptyState {
                     icon: Icon::Document,
-                    title: "No reports yet".to_string(),
-                    hint: "Start one, jot down what you saw, and the template turns it into a written report.".to_string(),
+                    title: t!("reports-empty-title"),
+                    hint: t!("reports-empty-hint"),
                     action: rsx! {
                         Button {
-                            label: "New report".to_string(),
+                            label: t!("reports-new"),
                             icon: Icon::Plus,
                             variant: Variant::Primary,
                             onclick: move |_| begin.call(starter_empty.clone()),
@@ -156,8 +159,8 @@ pub fn ReportsScreen(
             } else if shown.is_empty() {
                 EmptyState {
                     icon: Icon::Search,
-                    title: "Nothing matches that".to_string(),
-                    hint: "Try part of a report's name, or the template it was written from.".to_string(),
+                    title: t!("reports-nomatch-title"),
+                    hint: t!("reports-nomatch-hint"),
                 }
             } else {
                 List {
@@ -167,10 +170,10 @@ pub fn ReportsScreen(
                             name: report.name.clone(),
                             from: report.template_name.clone(),
                             tag: Some((
-                                if report.generated { "Final".to_string() } else { "Draft".to_string() },
+                                if report.generated { t!("reports-tag-final") } else { t!("reports-tag-draft") },
                                 !report.generated,
                             )),
-                            when: store::relative_time(report.updated),
+                            when: i18n::relative_time(report.updated),
                             onopen: {
                                 let id = report.id;
                                 move |_| open.call(id)
@@ -189,20 +192,28 @@ pub fn ReportsScreen(
 }
 
 /// One sentence about the library, or nothing when there is nothing to say.
+///
+/// The count is a Fluent plural selector rather than a `match` on 1, which is what makes it
+/// right in a language whose rules are not English's.
 fn subtitle(reports: &[Summary]) -> String {
     match reports.len() {
         0 => String::new(),
-        1 => format!("1 report · last written {}", store::relative_time(reports[0].updated)),
-        count => {
-            format!("{count} reports · last written {}", store::relative_time(reports[0].updated))
-        }
+        count => t!(
+            "reports-count",
+            count: count as i64,
+            when: i18n::relative_time(reports[0].updated)
+        ),
     }
 }
 
 /// Delete a report, once the user has confirmed it.
 fn delete(id: uuid::Uuid, name: String, workspace: Workspace, mut error: Signal<Option<String>>) {
+    // Translated here, before the spawn: `t!` resolves the catalogue out of the component's
+    // context, and inside a task past an `await` there is no scope left to resolve it from.
+    let action = t!("reports-delete-action");
+    let consequence = t!("confirm-no-undo");
     spawn(async move {
-        if !confirm::destructive("Delete report", &name, confirm::NO_UNDO).await {
+        if !confirm::destructive(&action, &name, &consequence).await {
             return;
         }
         match store::delete_report(id) {

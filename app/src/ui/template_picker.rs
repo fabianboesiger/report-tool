@@ -19,6 +19,7 @@ use dioxus::prelude::*;
 use report_core::store::{self, Summary};
 use report_core::Template;
 
+use crate::i18n::{self, t};
 use crate::ui::kit::{Button, List, Notice, NoticeKind, PageBody, PageHead, Row, Variant};
 
 /// A full-screen list of saved templates.
@@ -45,7 +46,7 @@ pub fn TemplatePicker(
             subtitle,
             actions: rsx! {
                 Button {
-                    label: "Cancel".to_string(),
+                    label: t!("picker-cancel"),
                     variant: Variant::Quiet,
                     onclick: move |_| on_cancel.call(()),
                 }
@@ -62,7 +63,7 @@ pub fn TemplatePicker(
                     Row {
                         key: "{item.id}",
                         name: item.name.clone(),
-                        when: store::relative_time(item.updated),
+                        when: i18n::relative_time(item.updated),
                         onopen: {
                             let id = item.id;
                             move |_| match store::load_template(id) {
@@ -78,12 +79,15 @@ pub fn TemplatePicker(
 
                 if allow_none {
                     Row {
-                        name: "No template".to_string(),
-                        from: "Just notes, no generated structure".to_string(),
+                        name: t!("picker-none-name"),
+                        from: t!("picker-none-hint"),
                         // Named for what it produces rather than for being empty: the name
                         // lands in the report's snapshot and shows in the library's "from"
-                        // column, where "Untitled template" would read as an oversight.
-                        onopen: move |_| on_pick.call(Template::new("No template")),
+                        // column, where "Untitled template" would read as an oversight. It is
+                        // captured in the language of the moment, like any other name a
+                        // report is given — changing language later must not rewrite reports
+                        // already made.
+                        onopen: move |_| on_pick.call(Template::new(t!("picker-none-name"))),
                     }
                 }
             }

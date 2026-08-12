@@ -9,12 +9,13 @@ use report_editor::Editor;
 
 use crate::dictate::{Dictation, DictationControl};
 use crate::generate::Status;
+use crate::i18n::{self, t};
 use crate::models::{ModelBanner, ModelStatus};
 use crate::ui::kit::{
     Banner, Button, EmptyState, Icon, Notice, NoticeKind, PageBody, PageHead, Pane, Variant,
 };
 use crate::ui::template_picker::TemplatePicker;
-use crate::ui::workspace::{export, SaveState, Workspace};
+use crate::ui::workspace::{export, Exported, SaveState, Workspace};
 
 #[component]
 #[allow(clippy::too_many_arguments)]
@@ -26,7 +27,7 @@ pub fn EditorScreen(
     save_state: Signal<SaveState>,
     on_generate: EventHandler<()>,
 ) -> Element {
-    let exported = use_signal(|| None::<String>);
+    let exported = use_signal(|| None::<Exported>);
     // `Some` opens the template picker over this screen. Holds the list as it was when the
     // button was pressed, for the same reason the reports screen does.
     let mut choosing = use_signal(|| None::<Vec<report_core::store::Summary>>);
@@ -42,7 +43,7 @@ pub fn EditorScreen(
     // place the user would learn that work is not being kept.
     let saved = save_state.read().clone();
     let subtitle = if template_name.is_empty() {
-        saved.message().to_string()
+        saved.message()
     } else {
         format!("{template_name} · {}", saved.message())
     };
@@ -51,13 +52,11 @@ pub fn EditorScreen(
         return rsx! {
             TemplatePicker {
                 templates,
-                title: "Change template".to_string(),
+                title: t!("editor-change-template-title"),
                 subtitle: if has_report {
-                    "This report already has written prose. Changing the template will not \
-                     rewrite it — press Write report again to apply the new structure."
-                        .to_string()
+                    t!("editor-change-template-written")
                 } else {
-                    "Which template should this report follow?".to_string()
+                    t!("editor-change-template-fresh")
                 },
                 on_pick: move |template| {
                     choosing.set(None);
@@ -83,9 +82,9 @@ pub fn EditorScreen(
                     // subtitle carries it too, but the decision this button changes is the
                     // one thing about a report that cannot be inferred from its notes.
                     label: if template_name.is_empty() {
-                        "Pick a template".to_string()
+                        t!("editor-pick-template")
                     } else {
-                        format!("Template: {template_name}")
+                        t!("editor-template-named", name: template_name.as_str())
                     },
                     icon: Icon::Layout,
                     variant: Variant::Quiet,
@@ -96,23 +95,20 @@ pub fn EditorScreen(
                         }
                         // Nothing saved to switch to. Said out loud, because a button that
                         // does nothing when pressed reads as broken.
-                        Ok(_) => picker_error.set(Some(
-                            "No templates saved yet — make one on the Templates screen."
-                                .to_string(),
-                        )),
+                        Ok(_) => picker_error.set(Some(t!("editor-no-templates-yet"))),
                         Err(problem) => picker_error.set(Some(format!("{problem:#}"))),
                     },
                 }
                 Button {
-                    label: "Export".to_string(),
+                    label: t!("editor-export"),
                     icon: Icon::Download,
                     variant: Variant::Quiet,
                     disabled: !has_report,
-                    title: if has_report { String::new() } else { "Write the report first".to_string() },
+                    title: if has_report { String::new() } else { t!("editor-export-needs-report") },
                     onclick: move |_| export(workspace, exported),
                 }
                 Button {
-                    label: if running { "Writing…".to_string() } else { "Write report".to_string() },
+                    label: if running { t!("editor-writing") } else { t!("editor-write") },
                     icon: Icon::Sparkle,
                     variant: Variant::Primary,
                     disabled: running,
@@ -131,20 +127,20 @@ pub fn EditorScreen(
 
         if let Some(error) = status.read().message() {
             Banner { warn: true,
-                span { "Could not write the report. {error}" }
+                span { {t!("editor-generate-failed", error: error)} }
             }
         }
 
         if saved.is_failed() {
             Banner { warn: true,
-                span { "{saved.message()}" }
+                span { {saved.message()} }
             }
         }
 
         PageBody { flush: true,
             div { class: "split",
                 Pane {
-                    label: "Your notes".to_string(),
+                    label: t!("editor-pane-notes"),
                     body_class: String::new(),
                     actions: rsx! {
                         DictateButton { dictation: dictation.clone() }
@@ -160,25 +156,30 @@ pub fn EditorScreen(
                         doc: workspace.notes,
                         toolbar: false,
                         class: "notes".to_string(),
-                        placeholder: "Jot down what you saw…".to_string(),
+                        placeholder: t!("editor-notes-placeholder"),
+                        labels: i18n::toolbar_labels(),
                     }
                 }
 
                 Pane {
-                    label: "Report".to_string(),
+                    label: t!("editor-pane-report"),
                     body_class: String::new(),
                     actions: rsx! {
                         if has_report {
-                            // "Written just now · edit freely" — the second half matters as
-                            // much as the first: the model's output is a draft to work on,
+                            // "Last written: just now · edit freely" — the second half matters
+                            // as much as the first: the model's output is a draft to work on,
                             // not a result to accept, and nothing else on screen says so.
+                            //
+                            // A colon before the timestamp rather than the lowercasing this
+                            // used to do, because a lowercase form is not one rule across
+                            // these four languages: German capitalises "Gestern" wherever it
+                            // stands and French does not.
                             span { class: "pane-hint",
                                 match *workspace.written_at.read() {
-                                    Some(when) => format!(
-                                        "Written {} · edit freely",
-                                        report_core::store::relative_time(when).to_lowercase(),
-                                    ),
-                                    None => "edit freely".to_string(),
+                                    Some(when) => {
+                                        t!("editor-written-hint", when: i18n::relative_time(when))
+                                    }
+                                    None => t!("editor-edit-freely"),
                                 }
                             }
                         }
@@ -188,19 +189,20 @@ pub fn EditorScreen(
                             doc: workspace.generated,
                             class: "doc".to_string(),
                             placeholder: String::new(),
+                            labels: i18n::toolbar_labels(),
                         }
                     } else {
                         EmptyState {
-                            title: "Nothing written yet".to_string(),
-                            hint: "Take your notes on the left, then press Write report. The template decides the headings and the order; the model only fills them in.".to_string(),
+                            title: t!("editor-empty-title"),
+                            hint: t!("editor-empty-hint"),
                         }
                     }
                 }
             }
 
-            if let Some(message) = exported() {
+            if let Some(outcome) = exported() {
                 div { style: "padding:0 28px",
-                    Notice { kind: NoticeKind::Ok, message }
+                    Notice { kind: NoticeKind::Ok, message: outcome.message() }
                 }
             }
         }
@@ -218,9 +220,9 @@ fn DictateButton(dictation: DictationControl) -> Element {
     let transcribing = matches!(state, Dictation::Transcribing);
 
     let label = match state {
-        Dictation::Recording => "Stop",
-        Dictation::Transcribing => "Transcribing…",
-        _ => "Dictate",
+        Dictation::Recording => t!("dictate-stop"),
+        Dictation::Transcribing => t!("dictate-transcribing"),
+        _ => t!("dictate-start"),
     };
 
     rsx! {

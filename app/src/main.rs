@@ -3,6 +3,7 @@
 mod audio;
 mod dictate;
 mod generate;
+mod i18n;
 mod models;
 mod ui;
 
@@ -161,6 +162,18 @@ fn App() -> Element {
     let screen = use_signal(|| Screen::Reports);
     let settings = use_signal(Settings::load);
 
+    // Before anything that says a word. `use_context_provider` publishes into this scope as
+    // well as below it, so `App`'s own rsx can translate too.
+    let locale = crate::i18n::use_app_i18n(settings);
+
+    // Logged for the same reason the compute backend is: `Language::System` reads the
+    // operating system, and if that resolves to something unexpected the only other symptom
+    // is an app in the wrong language and no way to tell whether the setting or the
+    // detection was at fault.
+    use_hook(move || {
+        tracing::info!("language: {} (setting: {:?})", locale.tag(), settings.peek().language)
+    });
+
     // **Two templates, not one.** These were a single signal, and sharing it was a data
     // bug rather than a shortcut: opening a template on the Templates screen reassigned the
     // open report's snapshot, autosave subscribes to that signal, and the report was
@@ -184,7 +197,7 @@ fn App() -> Element {
         generated: use_signal(RichDoc::empty_paragraph),
         has_report: use_signal(|| false),
         report_id: use_signal(|| None),
-        report_name: use_signal(|| "Untitled report".to_string()),
+        report_name: use_signal(|| i18n::t!("workspace-untitled-report")),
         written_at: use_signal(|| None),
         revision: use_signal(|| 0),
     };
@@ -235,7 +248,11 @@ fn App() -> Element {
             // Setting it through `document::eval` would queue behind the editor bridge's
             // own channel and paint one frame in the wrong theme first — a white flash on
             // every launch for anyone who chose Dark. See the token block in `app.css`.
-            div { class: "shell", "data-theme": theme.attribute(),
+            //
+            // `lang` rides along for the same reason it would anywhere: the notes and the
+            // report are `contenteditable`, and the webview's spellchecker and hyphenation
+            // read it off the nearest ancestor that has one.
+            div { class: "shell", lang: locale.tag(), "data-theme": theme.attribute(),
                 Rail { screen, settings }
 
                 main { class: "main",

@@ -78,25 +78,65 @@ impl Default for LocalConfig {
     }
 }
 
+/// What the microphone is expected to hear.
+///
+/// Three states rather than the free-text ISO code this replaced, because "the same as
+/// the app" and "work it out yourself" are different answers and an empty string cannot
+/// say both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Spoken {
+    /// Follow [`Settings::language`]. The default: someone running the app in German is
+    /// overwhelmingly likely to dictate in German, and saying so beats making whisper
+    /// guess from the first seconds of audio.
+    #[default]
+    App,
+    /// Let whisper detect the language per recording.
+    Detect,
+    /// A language named outright, for notes taken in one language with the app in
+    /// another.
+    Fixed(Locale),
+}
+
 /// Where the transcription model lives.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct SttConfig {
     /// Path to a whisper.cpp `ggml-*.bin` model.
     #[serde(default)]
     pub model_path: String,
-    /// ISO language code, or empty to let whisper detect it.
-    ///
-    /// Detection is the better default here: these notes are as likely to be German
-    /// as English, and a wrongly forced language produces confident nonsense rather
-    /// than a visible error.
     #[serde(default)]
+    pub spoken: Spoken,
+    /// The free-text ISO code that [`Spoken`] replaced.
+    ///
+    /// Read once by [`SttConfig::whisper_language`] while `spoken` is still at its
+    /// default, so that upgrading does not silently discard a language the user had
+    /// forced. `skip_serializing` rather than a conditional skip: it is never written
+    /// back at all, so the field leaves the stored blob the first time settings are
+    /// saved and this can be deleted a version later. The old empty-means-detect default
+    /// carries no information and is ignored.
+    #[serde(default, skip_serializing)]
     pub language: String,
 }
 
 impl SttConfig {
-    pub fn language(&self) -> Option<String> {
-        let language = self.language.trim();
-        (!language.is_empty()).then(|| language.to_string())
+    /// The code to hand `params.set_language`, or `None` for whisper's own detection.
+    ///
+    /// A wrongly forced language produces confident nonsense rather than a visible
+    /// error, which is why [`Spoken::Detect`] stays on offer — but it is no longer what
+    /// an unconfigured install gets, since the app now knows which language its user
+    /// works in.
+    pub fn whisper_language(&self, app: Locale) -> Option<&'static str> {
+        match self.spoken {
+            Spoken::Detect => None,
+            Spoken::Fixed(locale) => Some(locale.tag()),
+            // Only consulted here: a legacy code is a language the user chose once, and
+            // dropping it on upgrade would change what dictation does without telling
+            // anyone.
+            Spoken::App => match Locale::from_tag(&self.language) {
+                Some(legacy) => Some(legacy.tag()),
+                None => Some(app.tag()),
+            },
+        }
     }
 }
 
@@ -139,6 +179,136 @@ impl Default for Provider {
             Provider::Stub
         }
     }
+}
+
+/// Which language the app works in.
+///
+/// One setting for three things — the interface, the language reports are written in, and
+/// what dictation expects to hear — because they are one decision. Someone working in
+/// French wants all three in French, and three separate controls would only ever be set
+/// to the same value while offering a dozen ways to get it wrong.
+///
+/// `System` is the default for the same reason [`Theme::System`] is: it is the only value
+/// that is right without having been chosen, and unlike a language resolved once at first
+/// launch it keeps following the operating system when the user changes it there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Language {
+    #[default]
+    System,
+    German,
+    English,
+    French,
+    Italian,
+}
+
+impl Language {
+    /// The language to actually use.
+    ///
+    /// Never `System`, which is the point of the second type: everything downstream — the
+    /// Fluent bundle, the prompt, whisper — needs a language it can name, and threading a
+    /// "whatever the OS says" variant through all of them would mean each one resolving
+    /// it again and getting a different answer if the environment changed in between.
+    pub fn resolve(self) -> Locale {
+        match self {
+            Language::System => detect(),
+            Language::German => Locale::German,
+            Language::English => Locale::English,
+            Language::French => Locale::French,
+            Language::Italian => Locale::Italian,
+        }
+    }
+}
+
+/// A language the app actually ships.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Locale {
+    German,
+    English,
+    French,
+    Italian,
+}
+
+impl Locale {
+    /// Every language, in the order the settings picker offers them: the three Swiss
+    /// official languages this tool is used in, then English.
+    pub const ALL: [Locale; 4] = [Locale::German, Locale::English, Locale::French, Locale::Italian];
+
+    /// The primary subtag, which is all four of its uses want.
+    ///
+    /// It names the Fluent catalogue, it is the `lang` attribute on the shell — which is
+    /// what the webview's spellchecker reads inside the editor's `contenteditable` — and
+    /// it is the code whisper takes. One function because a second spelling of the same
+    /// value is a second thing to keep in step.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Locale::German => "de",
+            Locale::English => "en",
+            Locale::French => "fr",
+            Locale::Italian => "it",
+        }
+    }
+
+    /// The language's name in itself.
+    ///
+    /// Endonyms, not translations, because the language picker is the one control you
+    /// have to be able to read *before* the app is in a language you understand.
+    pub fn endonym(self) -> &'static str {
+        match self {
+            Locale::German => "Deutsch",
+            Locale::English => "English",
+            Locale::French => "Français",
+            Locale::Italian => "Italiano",
+        }
+    }
+
+    /// The name to use when telling the model which language to write in.
+    ///
+    /// English, deliberately: the rest of the system prompt is English, and an
+    /// instruction that stays in one language is the one that reliably lands. See
+    /// [`crate::prompt::system`].
+    pub fn in_english(self) -> &'static str {
+        match self {
+            Locale::German => "German",
+            Locale::English => "English",
+            Locale::French => "French",
+            Locale::Italian => "Italian",
+        }
+    }
+
+    /// The language a BCP-47 tag asks for, if it is one we ship.
+    ///
+    /// Only the primary subtag is considered: `de-CH`, `de-DE` and `de` are one catalogue
+    /// here, and there is nothing to gain from distinguishing them. Underscores are
+    /// accepted because that is what a POSIX `LANG` looks like (`de_CH.UTF-8`).
+    pub fn from_tag(tag: &str) -> Option<Locale> {
+        let primary = tag.trim().split(['-', '_', '.']).next()?.to_ascii_lowercase();
+        Locale::ALL.into_iter().find(|locale| locale.tag() == primary)
+    }
+}
+
+/// The operating system's language, or English.
+///
+/// English rather than an error for anything outside the four: a Japanese or Portuguese
+/// system is not a misconfiguration, and the honest response to a language we do not have
+/// is the one language nearly every user of this tool also reads.
+///
+/// ## Testing this by hand
+///
+/// Each platform is asked in its own way, and only one of them is the obvious one:
+///
+/// ```text
+/// macOS    ./report-tool -AppleLanguages "(fr-CH)"    # CFLocaleCopyPreferredLanguages
+/// Linux    LANG=fr_CH.UTF-8 ./report-tool             # LC_ALL / LC_MESSAGES / LANG
+/// Windows                                             # GetUserDefaultLocaleName
+/// ```
+///
+/// Worth writing down because **`LANG` does nothing on macOS** — `sys-locale` reads
+/// CoreFoundation there, so exporting it changes the app not at all and reads as detection
+/// being broken when it is working exactly as intended.
+fn detect() -> Locale {
+    sys_locale::get_locale().as_deref().and_then(Locale::from_tag).unwrap_or(Locale::English)
 }
 
 /// Which palette the window uses.
@@ -184,15 +354,6 @@ impl Theme {
             Theme::Dark => Theme::System,
         }
     }
-
-    /// The button's label, which doubles as its current value.
-    pub fn label(self) -> &'static str {
-        match self {
-            Theme::System => "Appearance: system",
-            Theme::Light => "Appearance: light",
-            Theme::Dark => "Appearance: dark",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -206,10 +367,20 @@ pub struct Settings {
     #[serde(default)]
     pub stt: SttConfig,
     #[serde(default)]
+    pub language: Language,
+    #[serde(default)]
     pub appearance: Theme,
 }
 
 impl Settings {
+    /// The language to use: the chosen one, or the operating system's.
+    ///
+    /// Everything that needs a language goes through here rather than reading
+    /// [`Settings::language`] directly, so `System` is resolved in exactly one place.
+    pub fn locale(&self) -> Locale {
+        self.language.resolve()
+    }
+
     /// Load the settings, falling back to defaults.
     ///
     /// Never fails, and that is deliberate. A database written by a future version, a
@@ -387,7 +558,12 @@ mod tests {
                 timeout_secs: 120,
             },
             local: LocalConfig { model_path: "/models/x.gguf".into(), context_tokens: 4096 },
-            stt: SttConfig { model_path: "/models/ggml-base.bin".into(), language: "de".into() },
+            stt: SttConfig {
+                model_path: "/models/ggml-base.bin".into(),
+                spoken: Spoken::Fixed(Locale::German),
+                language: String::new(),
+            },
+            language: Language::French,
             appearance: Theme::Dark,
         };
         let text = serde_json::to_string(&settings).unwrap();
@@ -406,6 +582,62 @@ mod tests {
         // Every state must be reachable, or the button silently has two positions.
         assert_eq!(Theme::System.next(), Theme::Light);
         assert_eq!(Theme::Light.next(), Theme::Dark);
+    }
+
+    #[test]
+    fn a_language_resolves_to_one_the_app_actually_ships() {
+        // The whole reason `resolve` returns a second type: nothing downstream should ever
+        // have to handle a "whatever the OS says" variant.
+        for language in [
+            Language::System,
+            Language::German,
+            Language::English,
+            Language::French,
+            Language::Italian,
+        ] {
+            assert!(Locale::ALL.contains(&language.resolve()), "{language:?}");
+        }
+        assert_eq!(Language::German.resolve(), Locale::German);
+        // `System` reads the environment, so the value is not assertable — only that it is
+        // one of the four, which the loop above already covers.
+    }
+
+    #[test]
+    fn a_tag_is_matched_on_its_primary_subtag_only() {
+        // Regions do not get their own catalogue: `de-CH` and `de-DE` are one language
+        // here, and a POSIX `LANG` brings its own punctuation.
+        assert_eq!(Locale::from_tag("de"), Some(Locale::German));
+        assert_eq!(Locale::from_tag("de-CH"), Some(Locale::German));
+        assert_eq!(Locale::from_tag("de_CH.UTF-8"), Some(Locale::German));
+        assert_eq!(Locale::from_tag("FR-ch"), Some(Locale::French), "case must not matter");
+        assert_eq!(Locale::from_tag(" it "), Some(Locale::Italian));
+
+        // A language we do not ship is not a misconfiguration; the caller falls back.
+        assert_eq!(Locale::from_tag("ja"), None);
+        assert_eq!(Locale::from_tag("pt-BR"), None);
+        assert_eq!(Locale::from_tag(""), None);
+        assert_eq!(Locale::from_tag("not a language tag"), None);
+        // `C` and `POSIX` are what a stripped-down container reports.
+        assert_eq!(Locale::from_tag("C"), None);
+        assert_eq!(Locale::from_tag("POSIX"), None);
+    }
+
+    #[test]
+    fn every_locale_has_a_distinct_tag_and_endonym() {
+        // Two locales sharing a tag would mean one silently rendering the other's
+        // catalogue, and a duplicated endonym would leave the picker with two
+        // indistinguishable rows.
+        for (index, locale) in Locale::ALL.into_iter().enumerate() {
+            for other in Locale::ALL.into_iter().skip(index + 1) {
+                assert_ne!(locale.tag(), other.tag(), "{locale:?} and {other:?}");
+                assert_ne!(locale.endonym(), other.endonym(), "{locale:?} and {other:?}");
+                assert_ne!(locale.in_english(), other.in_english(), "{locale:?} and {other:?}");
+            }
+            // The tag is the Fluent langid, the `lang` attribute and whisper's code all at
+            // once, so it has to stay a bare primary subtag.
+            assert_eq!(locale.tag().len(), 2, "{locale:?}");
+            assert_eq!(Locale::from_tag(locale.tag()), Some(locale), "{locale:?} must round-trip");
+        }
     }
 
     #[test]
@@ -464,6 +696,25 @@ mod tests {
         // Written before `appearance` existed, so it must default rather than fail the
         // whole file and reset the user's provider and key along with it.
         assert_eq!(settings.appearance, Theme::System);
+        // Same for `language`, which every existing install predates: following the system
+        // is what a settings blob with nothing to say about language must mean.
+        assert_eq!(settings.language, Language::System);
+        assert_eq!(settings.stt.spoken, Spoken::App);
+    }
+
+    #[test]
+    fn the_language_is_left_out_of_a_blob_that_never_set_it() {
+        // `spoken` and `language` both round-trip, but the legacy free-text code must not
+        // be written back — it exists only to be read once on upgrade.
+        let settings = Settings {
+            stt: SttConfig { spoken: Spoken::Detect, language: "de".into(), ..Default::default() },
+            language: Language::Italian,
+            ..Default::default()
+        };
+        let text = serde_json::to_string(&settings).unwrap();
+        assert!(text.contains(r#""language":"italian""#), "{text}");
+        assert!(text.contains(r#""spoken":"detect""#), "{text}");
+        assert!(!text.contains(r#""language":"de""#), "the legacy code must not be re-saved");
     }
 
     // Only meaningful where the connector exists; without it the backend refuses
@@ -471,7 +722,12 @@ mod tests {
     #[cfg(feature = "remote")]
     #[test]
     fn an_unconfigured_remote_backend_says_what_is_missing() {
-        let mut settings = Settings::default();
+        // `Remote` named outright rather than taken from `Settings::default()`, which is
+        // `Local` in a build with the engine — the test then built the *local* backend and
+        // passed or failed depending on whether a model happened to be downloaded on the
+        // machine running it. Green in CI, red on any developer's laptop that had used the
+        // app once.
+        let mut settings = Settings { provider: Provider::Remote, ..Default::default() };
         settings.openai.model.clear();
         // Mapped to a string so the Ok side is Debug; a trait object is not.
         let error = settings.backend().map(|b| b.describe()).unwrap_err().to_string();
@@ -490,7 +746,7 @@ mod tests {
         assert_eq!(settings.report_model_path(), Some(std::path::PathBuf::from("/my/own.gguf")));
 
         let settings = Settings {
-            stt: SttConfig { model_path: " /my/whisper.bin ".into(), language: String::new() },
+            stt: SttConfig { model_path: " /my/whisper.bin ".into(), ..Default::default() },
             ..Default::default()
         };
         assert_eq!(
@@ -566,12 +822,46 @@ mod stt_tests {
     use super::*;
 
     #[test]
-    fn an_empty_language_means_detect_rather_than_an_empty_code() {
+    fn an_unconfigured_install_dictates_in_the_app_language() {
+        // The behaviour change from the free-text field this replaced: whisper used to
+        // detect by default, and now it is told what to expect, because the app knows.
+        let config = SttConfig::default();
+        assert_eq!(config.whisper_language(Locale::French), Some("fr"));
+        assert_eq!(config.whisper_language(Locale::German), Some("de"));
+    }
+
+    #[test]
+    fn detection_is_still_reachable_and_still_means_no_code() {
         // Passing "" through to whisper would force an unnamed language rather than
-        // letting it detect one.
-        let config = SttConfig { model_path: "x".into(), language: "  ".into() };
-        assert_eq!(config.language(), None);
-        let config = SttConfig { model_path: "x".into(), language: " de ".into() };
-        assert_eq!(config.language(), Some("de".to_string()));
+        // letting it detect one, so the absence has to be an `Option`.
+        let config = SttConfig { spoken: Spoken::Detect, ..Default::default() };
+        assert_eq!(config.whisper_language(Locale::German), None);
+    }
+
+    #[test]
+    fn a_named_language_overrides_the_app() {
+        // The case the setting exists for: notes dictated in one language with the
+        // interface in another.
+        let config = SttConfig { spoken: Spoken::Fixed(Locale::Italian), ..Default::default() };
+        assert_eq!(config.whisper_language(Locale::German), Some("it"));
+    }
+
+    #[test]
+    fn a_legacy_iso_code_survives_the_upgrade() {
+        // A code in the old field is a language the user chose once. Dropping it would
+        // change what dictation does without telling anyone — the one thing an upgrade
+        // must not do.
+        let config = SttConfig { language: "de-CH".into(), ..Default::default() };
+        assert_eq!(config.whisper_language(Locale::English), Some("de"));
+
+        // But it loses to an explicit choice, since that is the newer decision.
+        let config =
+            SttConfig { spoken: Spoken::Detect, language: "de".into(), ..Default::default() };
+        assert_eq!(config.whisper_language(Locale::English), None);
+
+        // And a code we cannot make sense of falls through to the app language rather
+        // than being forwarded to whisper as-is.
+        let config = SttConfig { language: "klingon".into(), ..Default::default() };
+        assert_eq!(config.whisper_language(Locale::French), Some("fr"));
     }
 }

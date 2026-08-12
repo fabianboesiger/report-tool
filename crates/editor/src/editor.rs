@@ -10,7 +10,7 @@ use report_doc::{html, ops, Block, BlockId, BlockKind, Marks, RichDoc, Span};
 use crate::bridge::{use_bridge, Bridge, RawEvent};
 use crate::editable::{EditableText, Focus};
 use crate::keys;
-use crate::toolbar::Toolbar;
+use crate::toolbar::{Toolbar, ToolbarLabels};
 
 /// A selected range within one block.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -87,6 +87,9 @@ pub fn Editor(
     #[props(default = true)] toolbar: bool,
     #[props(default)] class: String,
     #[props(default = "Start typing…".to_string())] placeholder: String,
+    /// The toolbar's tooltips. Defaults to English; the app passes translations.
+    #[props(default)]
+    labels: ToolbarLabels,
 ) -> Element {
     let bridge = use_bridge();
     let focus = use_signal(Focus::default);
@@ -126,7 +129,7 @@ pub fn Editor(
     rsx! {
         div { class: "rt-editor {class}",
             if toolbar {
-                Toolbar {}
+                Toolbar { labels }
             }
             div { class: "rt-blocks",
                 for (index, block) in blocks.iter().enumerate() {

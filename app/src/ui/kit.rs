@@ -31,7 +31,7 @@ pub mod icon;
 pub mod layout;
 
 pub use controls::{Button, IconButton, NavLink, Variant};
-pub use fields::{ChoiceCard, Group, NumberField, TextField};
+pub use fields::{ChoiceCard, Group, NumberField, Select, TextField};
 pub use icon::{Glyph, Icon};
 pub use layout::{
     Banner, Bar, EmptyState, List, Notice, NoticeKind, PageBody, PageHead, Pane, Row,

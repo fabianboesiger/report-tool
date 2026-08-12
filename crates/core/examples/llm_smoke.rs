@@ -30,7 +30,14 @@ fn main() -> anyhow::Result<()> {
     // given llama.cpp build rejects.
     let probing = std::env::var("REPORT_GBNF").is_ok();
     let grammar = std::env::var("REPORT_GBNF").unwrap_or_else(|_| shape.to_gbnf());
-    let system = prompt::system(&template);
+    // `REPORT_LANGUAGE` picks the language the report is asked for, so the smoke test can
+    // check that a German or French run is still grammar-constrained and still validates.
+    // English by default, matching the notes below.
+    let locale = std::env::var("REPORT_LANGUAGE")
+        .ok()
+        .and_then(|tag| report_core::Locale::from_tag(&tag))
+        .unwrap_or(report_core::Locale::English);
+    let system = prompt::system(&template, locale);
     let user = prompt::user(NOTES);
 
     eprintln!("--- grammar ---\n{grammar}");

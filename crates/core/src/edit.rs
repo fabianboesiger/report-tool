@@ -294,6 +294,7 @@ mod tests {
         let shape = crate::compile::Shape::compile(&t);
         assert!(shape.to_json_schema()["properties"].get("conclusion").is_some());
         assert!(shape.to_gbnf().contains("conclusion"));
-        assert!(crate::prompt::system(&t).contains("A short summary."));
+        assert!(crate::prompt::system(&t, crate::settings::Locale::English)
+            .contains("A short summary."));
     }
 }

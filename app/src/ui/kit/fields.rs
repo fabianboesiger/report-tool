@@ -2,6 +2,8 @@
 
 use dioxus::prelude::*;
 
+use super::icon::{Glyph, Icon};
+
 /// A labelled text input with an optional line of help under it.
 #[component]
 pub fn TextField(
@@ -20,6 +22,52 @@ pub fn TextField(
                 value: "{value}",
                 placeholder: "{placeholder}",
                 oninput: move |event| oninput.call(event.value()),
+            }
+            if !hint.is_empty() {
+                span { class: "hint", "{hint}" }
+            }
+        }
+    }
+}
+
+/// A labelled dropdown, shaped like [`TextField`] so the two stack cleanly in a `Group`.
+///
+/// A real `<select>` under the app's own paint, for the same reason [`ChoiceCard`] wraps a
+/// real radio: the element is what supplies keyboard navigation, type-to-select and an
+/// accessible name, none of which a styled `div` and an `onclick` can imitate.
+///
+/// Radio cards would be the house style, but the language list is five options nobody
+/// revisits, and five cards is more vertical space than the decision is worth.
+///
+/// `options` is `(value, label)`. The value is an opaque token matched back by the caller —
+/// never a translated string, since Fluent wraps interpolations in invisible isolates and a
+/// round-tripped label would stop comparing equal.
+#[component]
+pub fn Select(
+    label: String,
+    #[props(default)] hint: String,
+    options: Vec<(String, String)>,
+    value: String,
+    onchange: EventHandler<String>,
+) -> Element {
+    rsx! {
+        label { class: "field",
+            span { "{label}" }
+            // The caret is a sibling glyph inside a positioned wrapper rather than a
+            // pseudo-element on the label, so it needs neither `:has()` — which this ships
+            // against whatever webkit2gtk a distro carries — nor a chevron written out once
+            // per theme as a data URI the palette cannot reach. Same shape as
+            // [`ChoiceCard`], which paints its own dot over a real radio.
+            span { class: "select-box",
+                select {
+                    class: "select",
+                    value: "{value}",
+                    onchange: move |event| onchange.call(event.value()),
+                    for (token, text) in options.iter() {
+                        option { key: "{token}", value: "{token}", selected: *token == value, "{text}" }
+                    }
+                }
+                Glyph { icon: Icon::ChevronDown }
             }
             if !hint.is_empty() {
                 span { class: "hint", "{hint}" }

@@ -51,4 +51,4 @@ pub use bridge::{use_bridge, Bridge, EditorRuntime, RawEvent};
 pub use editable::{EditableText, Focus};
 pub use editor::{doc_from_markdown, doc_to_markdown, Editor, EditorState, Selection};
 pub use keys::{markdown_shortcut, Shortcut};
-pub use toolbar::Toolbar;
+pub use toolbar::{Toolbar, ToolbarLabels};

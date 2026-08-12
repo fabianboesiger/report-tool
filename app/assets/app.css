@@ -488,6 +488,27 @@ input, textarea { font: inherit; color: inherit; }
 .field input:focus { border-color: var(--ink); }
 .field .hint { display: block; margin-top: 5px; font-size: 12px; color: var(--faint); line-height: 1.45; }
 
+/* The same box as `.field input`, so a dropdown and a text field stack without a seam.
+   `appearance: none` drops the platform chrome — on macOS that is a rounded grey capsule
+   with its own metrics, which no amount of padding here would reconcile with the inputs
+   above it — and `padding-right` reserves the column the caret is drawn in, without which a
+   long option name runs underneath it. */
+.select-box { position: relative; display: block; }
+.field select.select {
+  width: 100%; border: 1px solid var(--line-2); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--text);
+  padding: 8px 32px 8px 11px; font-size: 13.5px; outline: 0;
+  appearance: none; -webkit-appearance: none;
+}
+.field select.select:focus { border-color: var(--ink); }
+/* The caret `Select` renders beside the element. `currentColor` on the glyph means the
+   palette reaches it, and `pointer-events: none` keeps a click on it going through to the
+   select underneath. */
+.select-box svg {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  width: 14px; height: 14px; color: var(--muted); pointer-events: none;
+}
+
 /* --- banners and inline messages ------------------------------------------ */
 
 .banner {

@@ -27,6 +27,7 @@ use report_core::template::{NodeId, NodeKind, Template, TemplateNode};
 use report_doc::{BlockId, Span};
 use report_editor::{use_bridge, EditableText, Focus, RawEvent};
 
+use crate::i18n::t;
 use crate::ui::confirm;
 use crate::ui::kit::{Button, Icon, IconButton, NumberField, Variant};
 
@@ -67,15 +68,15 @@ pub fn TemplateBuilder(template: Signal<Template>) -> Element {
             input {
                 class: "tpl-name",
                 value: "{name}",
-                placeholder: "Template name",
-                "aria-label": "Template name",
+                placeholder: t!("builder-name-placeholder"),
+                "aria-label": t!("builder-name-placeholder"),
                 oninput: move |event| template.write().name = event.value(),
             }
             input {
                 class: "tpl-purpose",
                 value: "{purpose}",
-                placeholder: "What is this kind of report for?",
-                "aria-label": "What this kind of report is for",
+                placeholder: t!("builder-purpose-placeholder"),
+                "aria-label": t!("builder-purpose-label"),
                 oninput: move |event| template.write().description = event.value(),
             }
 
@@ -103,10 +104,7 @@ fn NodeList(
                 NodeCard { key: "{node.id}", template, focus, node: node.clone(), depth }
             }
             if explain_first_field {
-                p { class: "tpl-hint",
-                    "A template is a list of fields. Each one becomes a part of the report, and \
-                     what you write in it tells the model what belongs there. Add the first:"
-                }
+                p { class: "tpl-hint", {t!("builder-first-field-hint")} }
             }
             AddRow { template, parent }
         }
@@ -140,12 +138,12 @@ fn NodeCard(
     rsx! {
         div { class: "node node-{node.kind.tag()}",
             div { class: "node-head",
-                span { class: "kind", "{kind_label(&node.kind)}" }
+                span { class: "kind", {kind_label(&node.kind)} }
                 input {
                     class: "lbl",
                     value: "{node.label}",
-                    placeholder: "Field name",
-                    "aria-label": "Field name",
+                    placeholder: t!("builder-field-name"),
+                    "aria-label": t!("builder-field-name"),
                     oninput: move |event| {
                         template.write().set_label(id, event.value());
                     },
@@ -153,17 +151,17 @@ fn NodeCard(
                 span { class: "acts",
                     IconButton {
                         icon: Icon::ChevronUp,
-                        title: "Move up".to_string(),
+                        title: t!("builder-move-up"),
                         onclick: move |_| { template.write().move_by(id, -1); },
                     }
                     IconButton {
                         icon: Icon::ChevronDown,
-                        title: "Move down".to_string(),
+                        title: t!("builder-move-down"),
                         onclick: move |_| { template.write().move_by(id, 1); },
                     }
                     IconButton {
                         icon: Icon::Close,
-                        title: "Delete this field and everything in it".to_string(),
+                        title: t!("builder-delete-field"),
                         onclick: {
                             // A container takes its children with it, and the button is a
                             // small × next to two harmless move buttons. The count goes in
@@ -171,19 +169,22 @@ fn NodeCard(
                             let label = node.label.clone();
                             let nested = node.kind.children().map_or(0, count_nested);
                             move |_| {
-                                let label = label.clone();
+                                // All three strings built before the spawn — see `crate::i18n`.
+                                let action = t!("builder-delete-action");
+                                let named = if label.trim().is_empty() {
+                                    t!("builder-delete-unnamed")
+                                } else {
+                                    label.clone()
+                                };
+                                let no_undo = t!("confirm-no-undo");
+                                let consequence = if nested == 0 {
+                                    no_undo
+                                } else {
+                                    let nested = t!("builder-delete-nested", count: nested as i64);
+                                    format!("{nested} {no_undo}")
+                                };
                                 spawn(async move {
-                                    let named = if label.trim().is_empty() {
-                                        "this field".to_string()
-                                    } else {
-                                        label.clone()
-                                    };
-                                    let consequence = match nested {
-                                        0 => confirm::NO_UNDO.to_string(),
-                                        1 => format!("The field inside it goes too. {}", confirm::NO_UNDO),
-                                        n => format!("The {n} fields inside it go too. {}", confirm::NO_UNDO),
-                                    };
-                                    if confirm::destructive("Delete field", &named, &consequence).await {
+                                    if confirm::destructive(&action, &named, &consequence).await {
                                         template.write().remove(id);
                                     }
                                 });
@@ -239,14 +240,14 @@ fn Options(template: Signal<Template>, node: TemplateNode) -> Element {
                         }
                         // "numbered", not "ordered": one is what the user sees on the page,
                         // the other is what the JSON field happens to be called.
-                        "numbered"
+                        {t!("builder-numbered")}
                     }
                     NumberField {
-                        label: "at least".to_string(), value: min_items,
+                        label: t!("builder-at-least"), value: min_items,
                         on_change: move |v| set_list_bounds(template, id, Some(v), None),
                     }
                     NumberField {
-                        label: "at most".to_string(), value: max_items,
+                        label: t!("builder-at-most"), value: max_items,
                         on_change: move |v| set_list_bounds(template, id, None, Some(v)),
                     }
                 }
@@ -257,11 +258,12 @@ fn Options(template: Signal<Template>, node: TemplateNode) -> Element {
             rsx! {
                 div { class: "node-opts",
                     label {
-                        "one per "
+                        {t!("builder-one-per")}
+                        " "
                         input {
                             r#type: "text",
                             value: "{item_label}",
-                            placeholder: "defect",
+                            placeholder: t!("builder-item-placeholder"),
                             oninput: move |event| {
                                 if let Some(found) = template.write().find_mut(id) {
                                     if let NodeKind::Repeat { item_label, .. } = &mut found.kind {
@@ -272,11 +274,11 @@ fn Options(template: Signal<Template>, node: TemplateNode) -> Element {
                         }
                     }
                     NumberField {
-                        label: "at least".to_string(), value: min,
+                        label: t!("builder-at-least"), value: min,
                         on_change: move |v| set_repeat_bounds(template, id, Some(v), None),
                     }
                     NumberField {
-                        label: "at most".to_string(), value: max,
+                        label: t!("builder-at-most"), value: max,
                         on_change: move |v| set_repeat_bounds(template, id, None, Some(v)),
                     }
                 }
@@ -332,19 +334,23 @@ fn AddRow(template: Signal<Template>, parent: Option<NodeId>) -> Element {
     rsx! {
         div { class: "add",
             // Labelled as what they do to the report, not as what they are in the tree.
-            Button { label: "+ Paragraph".to_string(), variant: Variant::Ghost, onclick: add("paragraph") }
-            Button { label: "+ List".to_string(), variant: Variant::Ghost, onclick: add("list") }
-            Button { label: "+ Section".to_string(), variant: Variant::Ghost, onclick: add("section") }
-            Button { label: "+ Only sometimes".to_string(), variant: Variant::Ghost, onclick: add("optional") }
-            Button { label: "+ Repeats".to_string(), variant: Variant::Ghost, onclick: add("repeat") }
+            Button { label: t!("builder-add-paragraph"), variant: Variant::Ghost, onclick: add("paragraph") }
+            Button { label: t!("builder-add-list"), variant: Variant::Ghost, onclick: add("list") }
+            Button { label: t!("builder-add-section"), variant: Variant::Ghost, onclick: add("section") }
+            Button { label: t!("builder-add-optional"), variant: Variant::Ghost, onclick: add("optional") }
+            Button { label: t!("builder-add-repeat"), variant: Variant::Ghost, onclick: add("repeat") }
         }
     }
 }
 
+/// A new node of the requested kind.
+///
+/// The label is the kind's own name, translated — it is a placeholder the user types over,
+/// and there is no reason for a French template to start every field with an English word.
 fn blank(kind: &str) -> TemplateNode {
     match kind {
         "list" => TemplateNode::new(
-            "List",
+            t!("builder-kind-list"),
             NodeKind::List {
                 description: String::new(),
                 ordered: false,
@@ -353,15 +359,15 @@ fn blank(kind: &str) -> TemplateNode {
             },
         ),
         "section" => TemplateNode::new(
-            "Section",
+            t!("builder-kind-section"),
             NodeKind::Section { heading_description: String::new(), children: Vec::new() },
         ),
         "optional" => TemplateNode::new(
-            "Optional",
+            t!("builder-kind-sometimes"),
             NodeKind::Optional { description: String::new(), children: Vec::new() },
         ),
         "repeat" => TemplateNode::new(
-            "Repeat",
+            t!("builder-kind-repeats"),
             NodeKind::Repeat {
                 description: String::new(),
                 item_label: String::new(),
@@ -370,24 +376,34 @@ fn blank(kind: &str) -> TemplateNode {
                 children: Vec::new(),
             },
         ),
-        _ => TemplateNode::new("Paragraph", NodeKind::Paragraph { description: String::new() }),
+        _ => TemplateNode::new(
+            t!("builder-kind-paragraph"),
+            NodeKind::Paragraph { description: String::new() },
+        ),
     }
 }
 
-/// What a node is, said in the words of the report rather than of the tree.
+/// The catalogue key naming a node, in the words of the report rather than of the tree.
 ///
-/// "Optional" and "Repeat" are the names of the node kinds; "Sometimes" and "Repeats" are
+/// "Optional" and "Repeat" are the names of the node kinds; "sometimes" and "repeats" are
 /// what they do to the document. Nobody arranging a report thinks in node kinds, and the
 /// glyph prefixes the chips used to carry (`¶`, `§`, `↺`) were decoration on a word that
 /// already said it.
-fn kind_label(kind: &NodeKind) -> &'static str {
+///
+/// The key rather than the text, so the choice stays assertable without a running app — see
+/// the test below, which is the thing that stops the enum variants creeping back in.
+fn kind_key(kind: &NodeKind) -> &'static str {
     match kind {
-        NodeKind::Paragraph { .. } => "Paragraph",
-        NodeKind::List { .. } => "List",
-        NodeKind::Section { .. } => "Section",
-        NodeKind::Optional { .. } => "Sometimes",
-        NodeKind::Repeat { .. } => "Repeats",
+        NodeKind::Paragraph { .. } => "builder-kind-paragraph",
+        NodeKind::List { .. } => "builder-kind-list",
+        NodeKind::Section { .. } => "builder-kind-section",
+        NodeKind::Optional { .. } => "builder-kind-sometimes",
+        NodeKind::Repeat { .. } => "builder-kind-repeats",
     }
+}
+
+fn kind_label(kind: &NodeKind) -> String {
+    t!(kind_key(kind))
 }
 
 /// Style the instruction like the thing it produces, so the template reads as the
@@ -405,14 +421,13 @@ fn description_class(kind: &NodeKind, depth: u8) -> String {
 }
 
 fn placeholder(kind: &NodeKind) -> String {
-    match kind {
-        NodeKind::Paragraph { .. } => "What should this paragraph say?",
-        NodeKind::List { .. } => "What should each entry cover?",
-        NodeKind::Section { .. } => "What should the heading be called?",
-        NodeKind::Optional { .. } => "When should this be included?",
-        NodeKind::Repeat { .. } => "What is repeated, and once per what?",
-    }
-    .to_string()
+    t!(match kind {
+        NodeKind::Paragraph { .. } => "builder-placeholder-paragraph",
+        NodeKind::List { .. } => "builder-placeholder-list",
+        NodeKind::Section { .. } => "builder-placeholder-section",
+        NodeKind::Optional { .. } => "builder-placeholder-optional",
+        NodeKind::Repeat { .. } => "builder-placeholder-repeat",
+    })
 }
 
 fn handle(event: RawEvent, mut template: Signal<Template>, mut focus: Signal<Focus>) {
@@ -459,30 +474,33 @@ mod tests {
 
     #[test]
     fn node_kinds_are_named_after_what_they_do_to_the_report() {
-        // The jargon this redesign set out to remove. If "Optional" or "Repeat" come back
-        // it is because someone reached for the enum variant's name again.
+        // The jargon this redesign set out to remove. If "Optional" or "Repeat" come back it
+        // is because someone reached for the enum variant's name again — which, now that the
+        // words live in the catalogue, would show up as the key rather than the text.
         assert_eq!(
-            kind_label(&NodeKind::Optional { description: String::new(), children: vec![] }),
-            "Sometimes"
+            kind_key(&NodeKind::Optional { description: String::new(), children: vec![] }),
+            "builder-kind-sometimes"
         );
         assert_eq!(
-            kind_label(&NodeKind::Repeat {
+            kind_key(&NodeKind::Repeat {
                 description: String::new(),
                 item_label: String::new(),
                 min: None,
                 max: None,
                 children: vec![],
             }),
-            "Repeats"
+            "builder-kind-repeats"
         );
-        for kind in [
-            NodeKind::Paragraph { description: String::new() },
-            NodeKind::Section { heading_description: String::new(), children: vec![] },
-        ] {
-            let label = kind_label(&kind);
+
+        // And the English those keys resolve to, which is the half a key name cannot pin.
+        // Read out of `en.ftl` directly: `t!` needs a running app, and this does not.
+        let english = include_str!("../../assets/i18n/en.ftl");
+        assert!(english.contains("builder-kind-sometimes = Sometimes"), "not the variant's name");
+        assert!(english.contains("builder-kind-repeats = Repeats"));
+        for line in english.lines().filter(|line| line.starts_with("builder-kind-")) {
             assert!(
-                !label.contains('¶') && !label.contains('§') && !label.contains('↺'),
-                "the glyph prefixes were decoration on a word that already said it: {label}"
+                !line.contains('¶') && !line.contains('§') && !line.contains('↺'),
+                "the glyph prefixes were decoration on a word that already said it: {line}"
             );
         }
     }

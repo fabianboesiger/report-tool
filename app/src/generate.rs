@@ -45,7 +45,9 @@ pub async fn generate(
 
     // Both constraints travel together; each backend uses the one it can enforce.
     let request = JsonRequest::new(
-        prompt::system(&template),
+        // The report is written in the app's language, named outright in the prompt rather
+        // than left for the model to infer from the notes.
+        prompt::system(&template, settings.locale()),
         prompt::user(&notes_markdown),
         shape.to_json_schema(),
         shape.to_gbnf(),
@@ -126,7 +128,18 @@ mod tests {
         let settings = Settings { provider: Provider::Local, ..Default::default() };
         let error = generate(template(), "notes".into(), settings).await.unwrap_err();
         let message = error.to_string();
-        assert!(message.contains("Settings"), "the message must say where to fix it: {message}");
+        // Asserted per build, like the equivalent test in `report_core::settings`: a build
+        // with no engine cannot be missing a *model*, and it refuses for its own equally
+        // clear reason. Checking for "Settings" unconditionally made this fail on every
+        // `--no-default-features` run, which is what CI does.
+        if cfg!(feature = "inference") {
+            assert!(
+                message.contains("Settings"),
+                "the message must say where to fix it: {message}"
+            );
+        } else {
+            assert!(message.contains("no local engine"), "{message}");
+        }
         std::env::remove_var("REPORT_DATA_DIR");
     }
 

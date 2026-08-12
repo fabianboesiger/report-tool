@@ -15,18 +15,55 @@ use report_core::store;
 use report_core::template::{NodeKind, Template, TemplateNode};
 use uuid::Uuid;
 
+use crate::i18n::{self, t};
 use crate::ui::confirm;
 use crate::ui::kit::{
     Button, EmptyState, Icon, List, Notice, NoticeKind, PageBody, PageHead, Row, Variant,
 };
 use crate::ui::TemplateBuilder;
 
+/// What this screen last did.
+///
+/// A value rather than a rendered string, because half of these arrive from a spawned task —
+/// the file dialogs are `async` — and `t!` needs the component's context, which a task past
+/// an `await` no longer has. The component turns this into words when it draws it.
+#[derive(Clone, PartialEq)]
+enum Message {
+    Saved,
+    Exported(String),
+    ExportFailed(String),
+    NotText,
+    Imported(String),
+    /// A `report-core` error chain, still English: those are diagnostics rather than copy.
+    Failed(String),
+}
+
+impl Message {
+    fn kind(&self) -> NoticeKind {
+        match self {
+            Message::Saved | Message::Exported(_) | Message::Imported(_) => NoticeKind::Ok,
+            Message::ExportFailed(_) | Message::NotText | Message::Failed(_) => NoticeKind::Error,
+        }
+    }
+
+    fn text(&self) -> String {
+        match self {
+            Message::Saved => t!("templates-saved"),
+            Message::Exported(file) => t!("templates-exported", file: file.as_str()),
+            Message::ExportFailed(error) => t!("templates-export-failed", error: error.as_str()),
+            Message::NotText => t!("templates-not-text"),
+            Message::Imported(name) => t!("templates-imported", name: name.as_str()),
+            Message::Failed(error) => error.clone(),
+        }
+    }
+}
+
 #[component]
 pub fn TemplatesScreen(template: Signal<Template>) -> Element {
     // `None` is the list; `Some` is the builder, editing the template in `template`.
     let mut editing = use_signal(|| None::<Uuid>);
     let mut revision = use_signal(|| 0u64);
-    let mut message = use_signal(|| None::<(NoticeKind, String)>);
+    let mut message = use_signal(|| None::<Message>);
 
     let saved = use_memo(move || {
         let _ = revision.read();
@@ -36,9 +73,9 @@ pub fn TemplatesScreen(template: Signal<Template>) -> Element {
     let mut save = move || match store::save_template(&template.read()) {
         Ok(()) => {
             revision.with_mut(|count| *count += 1);
-            message.set(Some((NoticeKind::Ok, "Template saved".to_string())));
+            message.set(Some(Message::Saved));
         }
-        Err(error) => message.set(Some((NoticeKind::Error, format!("{error:#}")))),
+        Err(error) => message.set(Some(Message::Failed(format!("{error:#}")))),
     };
 
     if let Some(id) = editing() {
@@ -46,11 +83,11 @@ pub fn TemplatesScreen(template: Signal<Template>) -> Element {
         let purpose = template.read().description.clone();
         return rsx! {
             PageHead {
-                title: if name.is_empty() { "Untitled template".to_string() } else { name },
+                title: if name.is_empty() { t!("templates-untitled") } else { name },
                 subtitle: purpose,
                 actions: rsx! {
                     Button {
-                        label: "Back".to_string(),
+                        label: t!("templates-back"),
                         variant: Variant::Quiet,
                         onclick: move |_| {
                             editing.set(None);
@@ -58,34 +95,38 @@ pub fn TemplatesScreen(template: Signal<Template>) -> Element {
                         },
                     }
                     Button {
-                        label: "Duplicate".to_string(),
+                        label: t!("templates-duplicate"),
                         variant: Variant::Normal,
                         onclick: move |_| {
                             // A fresh id, so saving writes a second file rather than
                             // overwriting the one this was copied from.
                             let mut copy = template.read().clone();
                             copy.id = Uuid::new_v4();
-                            copy.name = format!("{} copy", copy.name);
+                            // Through `plain`, because this name is stored and later becomes a
+                            // filename: the isolate marks Fluent puts around `$name` would
+                            // survive into both.
+                            let named = t!("templates-copy-suffix", name: copy.name.as_str());
+                            copy.name = i18n::plain(named);
                             template.set(copy);
                             editing.set(Some(template.read().id));
                             save();
                         },
                     }
                     Button {
-                        label: "Export".to_string(),
+                        label: t!("templates-export"),
                         variant: Variant::Normal,
                         onclick: move |_| export(template.read().clone(), message),
                     }
                     Button {
-                        label: "Save template".to_string(),
+                        label: t!("templates-save"),
                         variant: Variant::Primary,
                         onclick: move |_| save(),
                     }
                 },
             }
             PageBody {
-                if let Some((kind, text)) = message() {
-                    Notice { kind, message: text }
+                if let Some(message) = message() {
+                    Notice { kind: message.kind(), message: message.text() }
                 }
                 TemplateBuilder { template }
             }
@@ -99,25 +140,24 @@ pub fn TemplatesScreen(template: Signal<Template>) -> Element {
 
     rsx! {
         PageHead {
-            title: "Templates".to_string(),
+            title: t!("templates-title"),
             subtitle: match all.len() {
                 0 => String::new(),
-                1 => "The shape each kind of report follows · 1 saved".to_string(),
-                count => format!("The shape each kind of report follows · {count} saved"),
+                count => t!("templates-count", count: count as i64),
             },
             actions: rsx! {
                 Button {
-                    label: "Import".to_string(),
+                    label: t!("templates-import"),
                     icon: Icon::Download,
                     variant: Variant::Normal,
                     onclick: move |_| import(revision, message),
                 }
                 Button {
-                    label: "New template".to_string(),
+                    label: t!("templates-new"),
                     icon: Icon::Plus,
                     variant: Variant::Primary,
                     onclick: move |_| {
-                        template.set(blank_template());
+                        template.set(blank_template(t!("templates-untitled")));
                         editing.set(Some(template.read().id));
                         save();
                     },
@@ -126,32 +166,32 @@ pub fn TemplatesScreen(template: Signal<Template>) -> Element {
         }
 
         PageBody {
-            if let Some((kind, text)) = message() {
-                Notice { kind, message: text }
+            if let Some(message) = message() {
+                Notice { kind: message.kind(), message: message.text() }
             }
 
             if all.is_empty() {
                 EmptyState {
                     icon: Icon::Layout,
-                    title: "No templates yet".to_string(),
-                    hint: "A template captures the shape of a report once — its headings, their order, and what each part is for. Every report you write from it follows that shape.".to_string(),
+                    title: t!("templates-empty-title"),
+                    hint: t!("templates-empty-hint"),
                     // Two buttons, because there were two behaviours behind one label: the
                     // header's "New template" gives an empty one and this used to give a
                     // filled-in Site inspection example. Asking for a new template and
                     // getting somebody else's is a fair thing to call broken.
                     action: rsx! {
                         Button {
-                            label: "New template".to_string(),
+                            label: t!("templates-new"),
                             icon: Icon::Plus,
                             variant: Variant::Primary,
                             onclick: move |_| {
-                                template.set(blank_template());
+                                template.set(blank_template(t!("templates-untitled")));
                                 editing.set(Some(template.read().id));
                                 save();
                             },
                         }
                         Button {
-                            label: "Start from an example".to_string(),
+                            label: t!("templates-start-example"),
                             variant: Variant::Normal,
                             onclick: move |_| {
                                 template.set(starter_template());
@@ -171,11 +211,12 @@ pub fn TemplatesScreen(template: Signal<Template>) -> Element {
                             // template with no fields generates nothing, and the default
                             // name means several of them read identically otherwise.
                             tag: match item.fields {
-                                0 => Some(("Empty".to_string(), true)),
-                                1 => Some(("1 field".to_string(), false)),
-                                count => Some((format!("{count} fields"), false)),
+                                0 => Some((t!("templates-tag-empty"), true)),
+                                count => {
+                                    Some((t!("templates-tag-fields", count: count as i64), false))
+                                }
                             },
-                            when: store::relative_time(item.updated),
+                            when: i18n::relative_time(item.updated),
                             onopen: {
                                 let id = item.id;
                                 move |_| match store::load_template(id) {
@@ -185,7 +226,7 @@ pub fn TemplatesScreen(template: Signal<Template>) -> Element {
                                         message.set(None);
                                     }
                                     Err(error) => {
-                                        message.set(Some((NoticeKind::Error, format!("{error:#}"))))
+                                        message.set(Some(Message::Failed(format!("{error:#}"))))
                                     }
                                 }
                             },
@@ -194,23 +235,18 @@ pub fn TemplatesScreen(template: Signal<Template>) -> Element {
                                 let name = item.name.clone();
                                 move |_| {
                                     let name = name.clone();
+                                    // Translated before the spawn — see `crate::i18n`.
+                                    let action = t!("templates-delete-action");
+                                    let consequence = t!("templates-delete-consequence");
                                     spawn(async move {
-                                        if !confirm::destructive(
-                                            "Delete template",
-                                            &name,
-                                            "Reports already written from it keep their own \
-                                             copy and are unaffected.",
-                                        )
-                                        .await
+                                        if !confirm::destructive(&action, &name, &consequence).await
                                         {
                                             return;
                                         }
                                         match store::delete_template(id) {
                                             Ok(()) => revision.with_mut(|count| *count += 1),
-                                            Err(error) => message.set(Some((
-                                                NoticeKind::Error,
-                                                format!("{error:#}"),
-                                            ))),
+                                            Err(error) => message
+                                                .set(Some(Message::Failed(format!("{error:#}")))),
                                         }
                                     });
                                 }
@@ -224,11 +260,11 @@ pub fn TemplatesScreen(template: Signal<Template>) -> Element {
 }
 
 /// Write a template out as `.json` for someone to send or commit.
-fn export(template: Template, mut message: Signal<Option<(NoticeKind, String)>>) {
+fn export(template: Template, mut message: Signal<Option<Message>>) {
     let json = match store::export_template(&template) {
         Ok(json) => json,
         Err(error) => {
-            message.set(Some((NoticeKind::Error, format!("{error:#}"))));
+            message.set(Some(Message::Failed(format!("{error:#}"))));
             return;
         }
     };
@@ -245,16 +281,14 @@ fn export(template: Template, mut message: Signal<Option<(NoticeKind, String)>>)
             return;
         };
         match file.write(json.as_bytes()).await {
-            Ok(()) => {
-                message.set(Some((NoticeKind::Ok, format!("Exported to {}", file.file_name()))))
-            }
-            Err(error) => message.set(Some((NoticeKind::Error, format!("Export failed: {error}")))),
+            Ok(()) => message.set(Some(Message::Exported(file.file_name()))),
+            Err(error) => message.set(Some(Message::ExportFailed(format!("{error}")))),
         }
     });
 }
 
 /// Read a template someone sent, and store it as a new one.
-fn import(mut revision: Signal<u64>, mut message: Signal<Option<(NoticeKind, String)>>) {
+fn import(mut revision: Signal<u64>, mut message: Signal<Option<Message>>) {
     spawn(async move {
         let Some(file) =
             rfd::AsyncFileDialog::new().add_filter("Template", &["json"]).pick_file().await
@@ -265,7 +299,7 @@ fn import(mut revision: Signal<u64>, mut message: Signal<Option<(NoticeKind, Str
         let text = match std::str::from_utf8(&bytes) {
             Ok(text) => text,
             Err(_) => {
-                message.set(Some((NoticeKind::Error, "That file is not text".to_string())));
+                message.set(Some(Message::NotText));
                 return;
             }
         };
@@ -274,9 +308,9 @@ fn import(mut revision: Signal<u64>, mut message: Signal<Option<(NoticeKind, Str
         match store::import_template(text) {
             Ok(imported) => {
                 revision.with_mut(|count| *count += 1);
-                message.set(Some((NoticeKind::Ok, format!("Imported \"{}\"", imported.name))));
+                message.set(Some(Message::Imported(imported.name)));
             }
-            Err(error) => message.set(Some((NoticeKind::Error, format!("{error:#}")))),
+            Err(error) => message.set(Some(Message::Failed(format!("{error:#}")))),
         }
     });
 }
@@ -296,8 +330,11 @@ fn file_stem(name: &str) -> String {
 }
 
 /// An empty template, for someone who knows what they want.
-fn blank_template() -> Template {
-    let mut template = Template::new("Untitled template");
+///
+/// The name is passed in because it is translated: a placeholder the user overwrites within
+/// seconds should still arrive in their own language.
+fn blank_template(name: String) -> Template {
+    let mut template = Template::new(name);
     template.description = String::new();
     template
 }
@@ -307,6 +344,13 @@ fn blank_template() -> Template {
 /// Offered from the empty state rather than seeded at startup: a first-time user gets a
 /// worked example to take apart, and everyone else gets a library that only contains what
 /// they made.
+///
+/// **The one English thing left in the UI, deliberately.** This is seeded *data*, not
+/// chrome: its labels and descriptions are the user's to edit, they land in every report's
+/// template snapshot, and they are fed to the model as instructions. Translating it means
+/// deciding what happens to a template already made when the language changes (nothing may
+/// happen to it) and how `template::slug` derives ASCII JSON keys from a non-English label.
+/// Both are worth doing and neither is a string swap, so it is left for its own change.
 pub fn starter_template() -> Template {
     let mut template = Template::new("Site inspection");
     template.description = "A record of a building inspection visit.".into();

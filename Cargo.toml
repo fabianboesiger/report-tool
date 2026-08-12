@@ -30,6 +30,21 @@ directories = "6"
 dioxus = { version = "0.7", features = ["desktop"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
+# --- Localisation -----------------------------------------------------------
+#
+# Fluent through `dioxus-i18n`, which keeps the active bundle in a `Signal` — so
+# changing the language re-renders the tree instead of needing a restart. The
+# catalogues are `include_str!`d rather than resolved through `asset!`, for the same
+# reason every other asset here is: nothing to be missing at runtime, and no path that
+# resolves differently between `dx serve` and a bundle. See `app/src/i18n.rs`.
+dioxus-i18n = "0.5"
+# `macros` for `langid!`, which validates a tag at compile time rather than leaving a
+# `.parse().unwrap()` to fire on startup.
+unic-langid = { version = "0.9", features = ["macros"] }
+# The OS language, as BCP-47: CoreFoundation on macOS, GetUserDefaultLocaleName on
+# Windows, LC_ALL/LC_MESSAGES/LANG on Linux. No dependencies of its own on desktop.
+sys-locale = "0.3"
+
 # --- Local inference: llama.cpp + whisper.cpp -------------------------------
 #
 # Both are ggml-based. They run in SEPARATE worker processes, never together —

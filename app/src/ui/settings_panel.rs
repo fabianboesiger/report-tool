@@ -15,19 +15,22 @@
 //! grouped by which decision they belong to.
 
 use dioxus::prelude::*;
-use report_core::settings::{Provider, Settings};
+use report_core::settings::{Language, Locale, Provider, Settings, Spoken};
 
+use crate::i18n::t;
 use crate::ui::kit::{
-    Button, ChoiceCard, Group, Icon, Notice, NoticeKind, PageBody, PageHead, TextField, Variant,
+    Button, ChoiceCard, Group, Icon, Notice, NoticeKind, PageBody, PageHead, Select, TextField,
+    Variant,
 };
 
 #[component]
 pub fn SettingsPanel(settings: Signal<Settings>) -> Element {
     // Saving is explicit. Writing the file on every keystroke would put a partial API key
-    // on disk dozens of times while it is being typed. (Appearance is the exception, and
-    // saves itself from the rail — see `ui::rail`.)
+    // on disk dozens of times while it is being typed. (Appearance and language are the
+    // exceptions, and each says why where it saves itself.)
     let mut saved = use_signal(|| None::<Result<(), String>>);
     let provider = settings.read().provider;
+    let locale = settings.read().locale();
 
     let mut save = move || {
         let result = settings.read().save().map_err(|error| format!("{error:#}"));
@@ -36,11 +39,11 @@ pub fn SettingsPanel(settings: Signal<Settings>) -> Element {
 
     rsx! {
         PageHead {
-            title: "Settings".to_string(),
-            subtitle: "Where reports get written, and how dictation behaves".to_string(),
+            title: t!("settings-title"),
+            subtitle: t!("settings-subtitle"),
             actions: rsx! {
                 Button {
-                    label: "Save settings".to_string(),
+                    label: t!("settings-save"),
                     variant: Variant::Primary,
                     onclick: move |_| save(),
                 }
@@ -50,21 +53,45 @@ pub fn SettingsPanel(settings: Signal<Settings>) -> Element {
         PageBody {
             div { class: "set",
                 match &*saved.read() {
-                    Some(Ok(())) => rsx! { Notice { kind: NoticeKind::Ok, message: "Saved".to_string() } },
+                    Some(Ok(())) => rsx! { Notice { kind: NoticeKind::Ok, message: t!("settings-saved") } },
                     Some(Err(error)) => rsx! { Notice { kind: NoticeKind::Error, message: error.clone() } },
                     None => rsx! {},
                 }
 
+                // First on the page, because it is the one setting that changes everything
+                // else on it — including the words the other groups are written in.
                 Group {
-                    title: "Where reports are written".to_string(),
-                    sub: "This decides whether your notes ever leave this computer.".to_string(),
+                    title: t!("settings-language-title"),
+                    sub: t!("settings-language-sub"),
+                    Select {
+                        label: t!("settings-language-label"),
+                        options: language_options(),
+                        value: language_token(settings.read().language).to_string(),
+                        onchange: move |token: String| {
+                            let Some(language) = language_from_token(&token) else { return };
+                            settings.write().language = language;
+                            // Saved on the spot, for the same reason appearance is: the whole
+                            // window is in the new language the instant this changes, and
+                            // leaving that unsaved would mean the app reads as changed and is
+                            // not. Picking a language is also a complete decision the moment
+                            // it is made, which a half-typed API key is not.
+                            if let Err(error) = settings.read().save() {
+                                tracing::warn!("settings: could not persist language: {error:#}");
+                            }
+                        },
+                    }
+                }
+
+                Group {
+                    title: t!("settings-provider-title"),
+                    sub: t!("settings-provider-sub"),
 
                     for choice in provider_choices() {
                         ChoiceCard {
-                            key: "{choice.title}",
+                            key: "{choice.key}",
                             group: "provider".to_string(),
-                            title: choice.title.to_string(),
-                            hint: choice.hint.to_string(),
+                            title: choice.title,
+                            hint: choice.hint,
                             on: provider == choice.provider,
                             disabled: !choice.available,
                             onselect: move |_| settings.write().provider = choice.provider,
@@ -73,22 +100,18 @@ pub fn SettingsPanel(settings: Signal<Settings>) -> Element {
                 }
 
                 Group {
-                    title: "The model on this computer".to_string(),
-                    sub: "Used when you choose On this computer. Both files are managed for \
-                          you — set a path only to use one you already have."
-                        .to_string(),
+                    title: t!("settings-local-title"),
+                    sub: t!("settings-local-sub"),
                     TextField {
-                        label: "Report model".to_string(),
-                        placeholder: "Managed by the app".to_string(),
-                        hint: "Full path to a GGUF. Setting it suppresses the download."
-                            .to_string(),
+                        label: t!("settings-local-model"),
+                        placeholder: t!("settings-local-managed"),
+                        hint: t!("settings-local-model-hint"),
                         value: settings.read().local.model_path.clone(),
                         oninput: move |value| settings.write().local.model_path = value,
                     }
                     TextField {
-                        label: "Context tokens".to_string(),
-                        hint: "The template's instructions and the notes must both fit. Larger \
-                               costs memory and prefill time.".to_string(),
+                        label: t!("settings-local-context"),
+                        hint: t!("settings-local-context-hint"),
                         value: settings.read().local.context_tokens.to_string(),
                         oninput: move |value: String| {
                             if let Ok(tokens) = value.trim().parse::<usize>() {
@@ -99,34 +122,31 @@ pub fn SettingsPanel(settings: Signal<Settings>) -> Element {
                 }
 
                 Group {
-                    title: "The server".to_string(),
-                    sub: "Used when you choose Company server. Anything speaking the OpenAI \
-                          API — api.openai.com/v1, localhost:11434/v1 for Ollama, or your own \
-                          gateway.".to_string(),
+                    title: t!("settings-server-title"),
+                    sub: t!("settings-server-sub"),
                     TextField {
-                        label: "Address".to_string(),
+                        label: t!("settings-server-address"),
                         value: settings.read().openai.base_url.clone(),
                         oninput: move |value| settings.write().openai.base_url = value,
                     }
                     TextField {
-                        label: "Model".to_string(),
-                        hint: "The model id the server expects.".to_string(),
+                        label: t!("settings-server-model"),
+                        hint: t!("settings-server-model-hint"),
                         value: settings.read().openai.model.clone(),
                         oninput: move |value| settings.write().openai.model = value,
                     }
                     TextField {
-                        label: "Key".to_string(),
+                        label: t!("settings-server-key"),
                         // Said plainly rather than hidden: it is the user's call whether
                         // that is acceptable on this machine.
-                        hint: "Stored in plain text alongside your reports. Leave empty for a \
-                               server that wants none.".to_string(),
+                        hint: t!("settings-server-key-hint"),
                         value: settings.read().openai.api_key.clone(),
                         secret: true,
                         oninput: move |value| settings.write().openai.api_key = value,
                     }
                     TextField {
-                        label: "Request timeout (seconds)".to_string(),
-                        hint: "A long report on a small model can take minutes.".to_string(),
+                        label: t!("settings-server-timeout"),
+                        hint: t!("settings-server-timeout-hint"),
                         value: settings.read().openai.timeout_secs.to_string(),
                         oninput: move |value: String| {
                             if let Ok(seconds) = value.trim().parse::<u64>() {
@@ -137,34 +157,33 @@ pub fn SettingsPanel(settings: Signal<Settings>) -> Element {
                 }
 
                 Group {
-                    title: "Dictation".to_string(),
-                    sub: "Speech is turned into text on this computer. Recordings are never \
-                          uploaded.".to_string(),
-                    TextField {
-                        label: "Spoken language".to_string(),
-                        placeholder: "Detect automatically".to_string(),
-                        hint: "An ISO code such as de or en. Leave empty to detect it — a \
-                               wrongly forced language produces confident nonsense rather \
-                               than a visible error.".to_string(),
-                        value: settings.read().stt.language.clone(),
-                        oninput: move |value| settings.write().stt.language = value,
+                    title: t!("settings-dictation-title"),
+                    sub: t!("settings-dictation-sub"),
+                    Select {
+                        label: t!("settings-spoken-label"),
+                        hint: t!("settings-spoken-hint"),
+                        options: spoken_options(locale),
+                        value: spoken_token(settings.read().stt.spoken),
+                        onchange: move |token: String| {
+                            if let Some(spoken) = spoken_from_token(&token) {
+                                settings.write().stt.spoken = spoken;
+                            }
+                        },
                     }
                     TextField {
-                        label: "Dictation model".to_string(),
-                        placeholder: "Managed by the app".to_string(),
-                        hint: "Full path to a whisper.cpp ggml model. Same rule as the report \
-                               model: empty means the managed download.".to_string(),
+                        label: t!("settings-dictation-model"),
+                        placeholder: t!("settings-local-managed"),
+                        hint: t!("settings-dictation-model-hint"),
                         value: settings.read().stt.model_path.clone(),
                         oninput: move |value| settings.write().stt.model_path = value,
                     }
                 }
 
                 Group {
-                    title: "Appearance".to_string(),
-                    sub: "The window follows your system unless you choose otherwise. This \
-                          one saves itself.".to_string(),
+                    title: t!("settings-appearance-title"),
+                    sub: t!("settings-appearance-sub"),
                     Button {
-                        label: settings.read().appearance.label().to_string(),
+                        label: appearance_label(settings.read().appearance),
                         icon: Icon::Moon,
                         onclick: move |_| {
                             let next = settings.read().appearance.next();
@@ -182,23 +201,17 @@ pub fn SettingsPanel(settings: Signal<Settings>) -> Element {
                 }
 
                 Group {
-                    title: "Your data".to_string(),
-                    sub: "Everything you write — reports, templates and these settings — is \
-                          one small database file. The models sitting beside it are the large \
-                          part, several gigabytes each.".to_string(),
+                    title: t!("settings-data-title"),
+                    sub: t!("settings-data-sub"),
                     Button {
-                        label: reveal_label().to_string(),
+                        label: reveal_label(),
                         onclick: move |_| {
                             if let Err(error) = reveal_data_dir() {
                                 saved.set(Some(Err(format!("{error:#}"))));
                             }
                         },
                     }
-                    p { class: "hint",
-                        "Two reasons to open it: copying that one file backs up every report \
-                         and template, and the models are where the disk space goes if you \
-                         need it back."
-                    }
+                    p { class: "hint", {t!("settings-data-hint")} }
                 }
 
                 if cfg!(debug_assertions) {
@@ -212,8 +225,12 @@ pub fn SettingsPanel(settings: Signal<Settings>) -> Element {
 /// A provider, said as a place rather than as a protocol.
 struct Choice {
     provider: Provider,
-    title: &'static str,
-    hint: &'static str,
+    /// A stable key for the rsx loop. Not the title: that is now translated, and keying a
+    /// list on text that changes with the language would remount all three cards on every
+    /// language switch.
+    key: &'static str,
+    title: String,
+    hint: String,
     available: bool,
 }
 
@@ -223,40 +240,140 @@ fn provider_choices() -> Vec<Choice> {
     vec![
         Choice {
             provider: Provider::Local,
-            title: "On this computer",
+            key: "local",
+            title: t!("settings-provider-local-title"),
             hint: if cfg!(feature = "inference") {
-                "Nothing leaves the device. Slower on long reports."
+                t!("settings-provider-local-hint")
             } else {
-                "Not in this build (compiled without `inference`)."
+                t!("settings-provider-local-absent")
             },
             available: cfg!(feature = "inference"),
         },
         Choice {
             provider: Provider::Remote,
-            title: "Company server",
+            key: "remote",
+            title: t!("settings-provider-remote-title"),
             hint: if cfg!(feature = "remote") {
-                "Faster. Your notes are sent to the address under The server, below."
+                t!("settings-provider-remote-hint")
             } else {
-                "Not in this build (compiled without `remote`)."
+                t!("settings-provider-remote-absent")
             },
             available: cfg!(feature = "remote"),
         },
         Choice {
             provider: Provider::Stub,
-            title: "Example text",
-            hint: "Fills the template with placeholder text. For trying things out.",
+            key: "stub",
+            title: t!("settings-provider-stub-title"),
+            hint: t!("settings-provider-stub-hint"),
             available: true,
         },
     ]
 }
 
-fn reveal_label() -> &'static str {
+/// The appearance button's label, which doubles as its current value.
+///
+/// One cycling button rather than three radios: appearance is not worth a settings group of
+/// its own, cycling means the label always states what you have, and pressing three times
+/// returns you to where you started.
+fn appearance_label(theme: report_core::settings::Theme) -> String {
+    use report_core::settings::Theme;
+    match theme {
+        Theme::System => t!("settings-appearance-system"),
+        Theme::Light => t!("settings-appearance-light"),
+        Theme::Dark => t!("settings-appearance-dark"),
+    }
+}
+
+/// The language picker's options.
+///
+/// Endonyms, so the row you are looking for is legible even when the interface is in a
+/// language you cannot read — which is exactly the situation someone opening this control is
+/// most likely to be in. Swiss order: the three official languages, then English.
+fn language_options() -> Vec<(String, String)> {
+    let mut options = vec![(
+        SYSTEM_TOKEN.to_string(),
+        t!("settings-language-system", endonym: Language::System.resolve().endonym()),
+    )];
+    options.extend(Locale::ALL.into_iter().map(|locale| {
+        // The endonym is its own label: translating "German" into four languages would give
+        // four strings for one row, none of which a German speaker needs.
+        (locale.tag().to_string(), locale.endonym().to_string())
+    }));
+    options
+}
+
+/// The token that stands for "follow the system".
+///
+/// Not a language tag, so it cannot collide with one, and not a translated string — Fluent
+/// wraps interpolations in invisible isolates, so a round-tripped label would stop comparing
+/// equal to the value that produced it.
+const SYSTEM_TOKEN: &str = "system";
+
+fn language_token(language: Language) -> &'static str {
+    match language {
+        Language::System => SYSTEM_TOKEN,
+        Language::German => "de",
+        Language::English => "en",
+        Language::French => "fr",
+        Language::Italian => "it",
+    }
+}
+
+fn language_from_token(token: &str) -> Option<Language> {
+    match token {
+        SYSTEM_TOKEN => Some(Language::System),
+        "de" => Some(Language::German),
+        "en" => Some(Language::English),
+        "fr" => Some(Language::French),
+        "it" => Some(Language::Italian),
+        // A value the `<select>` cannot have produced. Ignored rather than defaulted, so a
+        // future option added to the markup and forgotten here does nothing visible instead
+        // of silently resetting the language.
+        _ => None,
+    }
+}
+
+/// The dictation picker's options: the app's language, whisper's own detection, then each
+/// language by name.
+fn spoken_options(app: Locale) -> Vec<(String, String)> {
+    let mut options = vec![
+        (APP_TOKEN.to_string(), t!("settings-spoken-app", endonym: app.endonym())),
+        (DETECT_TOKEN.to_string(), t!("settings-spoken-detect")),
+    ];
+    options.extend(
+        Locale::ALL
+            .into_iter()
+            .map(|locale| (locale.tag().to_string(), locale.endonym().to_string())),
+    );
+    options
+}
+
+const APP_TOKEN: &str = "app";
+const DETECT_TOKEN: &str = "detect";
+
+fn spoken_token(spoken: Spoken) -> String {
+    match spoken {
+        Spoken::App => APP_TOKEN.to_string(),
+        Spoken::Detect => DETECT_TOKEN.to_string(),
+        Spoken::Fixed(locale) => locale.tag().to_string(),
+    }
+}
+
+fn spoken_from_token(token: &str) -> Option<Spoken> {
+    match token {
+        APP_TOKEN => Some(Spoken::App),
+        DETECT_TOKEN => Some(Spoken::Detect),
+        tag => Locale::from_tag(tag).map(Spoken::Fixed),
+    }
+}
+
+fn reveal_label() -> String {
     if cfg!(target_os = "macos") {
-        "Show in Finder"
+        t!("settings-reveal-finder")
     } else if cfg!(target_os = "windows") {
-        "Show in Explorer"
+        t!("settings-reveal-explorer")
     } else {
-        "Show files"
+        t!("settings-reveal-files")
     }
 }
 
@@ -292,22 +409,22 @@ fn DeveloperGroup(settings: Signal<Settings>) -> Element {
         // Three sections rather than three collapsibles inside one. Each dump already
         // scrolls at 300px, so flattening them costs no more page than the summaries did.
         Group {
-            title: "Developer · backend".to_string(),
-            sub: "Only in a debug build. What the model is actually sent.".to_string(),
+            title: t!("settings-dev-backend-title"),
+            sub: t!("settings-dev-backend-sub"),
             pre { class: "dev-dump", "{settings.read().describe()}" }
         }
         Group {
-            title: "Developer · system prompt".to_string(),
-            sub: "Built from the open report's template. The only route a field description \
-                  has to a locally generated report."
-                .to_string(),
-            pre { class: "dev-dump", "{report_core::prompt::system(&template.read())}" }
+            title: t!("settings-dev-prompt-title"),
+            sub: t!("settings-dev-prompt-sub"),
+            // The locale too, so the dump shows the language line the model actually gets
+            // rather than a prompt nobody sends.
+            pre { class: "dev-dump",
+                "{report_core::prompt::system(&template.read(), settings.read().locale())}"
+            }
         }
         Group {
-            title: "Developer · JSON schema".to_string(),
-            sub: "What a remote server is constrained by. The local grammar is compiled from \
-                  the same traversal."
-                .to_string(),
+            title: t!("settings-dev-schema-title"),
+            sub: t!("settings-dev-schema-sub"),
             pre { class: "dev-dump", "{schema_preview(&template.read())}" }
         }
     }

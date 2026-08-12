@@ -19,6 +19,10 @@ directories = { workspace = true }
 # and the wasm FFI backend in its default features is inert, so plain `bundled` is all
 # that is needed here.
 rusqlite = { version = "0.40", features = ["bundled"] }
+# Reads the OS language for `Language::System`. Here rather than in the app so that
+# resolving a language is one self-contained, testable function that the prompt and the
+# transcriber can reach without going through the UI.
+sys-locale = { workspace = true }
 
 # Heavy ML stack, only compiled with the `inference` feature so the template
 # compilers, the renderer and the UI can be built and tested in seconds without

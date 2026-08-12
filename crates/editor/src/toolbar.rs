@@ -11,8 +11,52 @@ use report_doc::{BlockKind, Marks};
 
 use crate::editor::EditorState;
 
+/// The toolbar's tooltips, supplied by the host.
+///
+/// A prop rather than a lookup, for the same reason [`crate::Editor`]'s `placeholder` is
+/// one: this crate must not learn about the app, and the app's Fluent catalogue is the
+/// app's. (Nor could it have its own — a Fluent bundle admits exactly one resource per
+/// language, so there is no way for two crates to contribute keys to the same catalogue.)
+///
+/// The button faces themselves — `B`, `¶`, `1.`, `❝` — are glyphs and are not here;
+/// they read the same in every language and translating them would only break the
+/// toolbar's alignment.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolbarLabels {
+    pub bold: String,
+    pub italic: String,
+    pub code: String,
+    pub strike: String,
+    pub paragraph: String,
+    /// One per heading level, rendered whole rather than as a stem plus a number:
+    /// "Heading 2" and "Titolo 2" happen to share their word order, and the next
+    /// language need not.
+    pub headings: [String; 3],
+    pub bulleted: String,
+    pub numbered: String,
+    pub quote: String,
+}
+
+impl Default for ToolbarLabels {
+    /// English, so that a host that says nothing still gets a usable toolbar rather than
+    /// nine empty tooltips.
+    fn default() -> Self {
+        Self {
+            bold: "Bold (Cmd/Ctrl+B)".into(),
+            italic: "Italic (Cmd/Ctrl+I)".into(),
+            code: "Code (Cmd/Ctrl+E)".into(),
+            strike: "Strikethrough".into(),
+            paragraph: "Paragraph".into(),
+            headings: ["Heading 1".into(), "Heading 2".into(), "Heading 3".into()],
+            bulleted: "Bulleted list".into(),
+            numbered: "Numbered list".into(),
+            quote: "Quote".into(),
+        }
+    }
+}
+
 #[component]
-pub fn Toolbar() -> Element {
+pub fn Toolbar(#[props(default)] labels: ToolbarLabels) -> Element {
     let state = use_context::<EditorState>();
     let current = state.current_kind();
 
@@ -20,15 +64,15 @@ pub fn Toolbar() -> Element {
 
     rsx! {
         div { class: "rt-toolbar", role: "toolbar",
-            MarkButton { mark: Marks::BOLD, label: "B", title: "Bold (Cmd/Ctrl+B)", class: "rt-bold" }
-            MarkButton { mark: Marks::ITALIC, label: "I", title: "Italic (Cmd/Ctrl+I)", class: "rt-italic" }
-            MarkButton { mark: Marks::CODE, label: "‹›", title: "Code (Cmd/Ctrl+E)", class: "rt-mono" }
-            MarkButton { mark: Marks::STRIKE, label: "S", title: "Strikethrough", class: "rt-strike" }
+            MarkButton { mark: Marks::BOLD, label: "B", title: labels.bold.clone(), class: "rt-bold" }
+            MarkButton { mark: Marks::ITALIC, label: "I", title: labels.italic.clone(), class: "rt-italic" }
+            MarkButton { mark: Marks::CODE, label: "‹›", title: labels.code.clone(), class: "rt-mono" }
+            MarkButton { mark: Marks::STRIKE, label: "S", title: labels.strike.clone(), class: "rt-strike" }
 
             span { class: "rt-sep" }
 
             KindButton {
-                kind: BlockKind::Paragraph, label: "¶", title: "Paragraph",
+                kind: BlockKind::Paragraph, label: "¶", title: labels.paragraph.clone(),
                 active: is(&BlockKind::Paragraph),
             }
             for level in 1..=3u8 {
@@ -36,7 +80,7 @@ pub fn Toolbar() -> Element {
                     key: "h{level}",
                     kind: BlockKind::Heading { level },
                     label: "H{level}",
-                    title: "Heading {level}",
+                    title: labels.headings[level as usize - 1].clone(),
                     active: is(&BlockKind::Heading { level }),
                 }
             }
@@ -44,15 +88,15 @@ pub fn Toolbar() -> Element {
             span { class: "rt-sep" }
 
             KindButton {
-                kind: BlockKind::BulletItem { indent: 0 }, label: "•", title: "Bulleted list",
+                kind: BlockKind::BulletItem { indent: 0 }, label: "•", title: labels.bulleted.clone(),
                 active: matches!(current, Some(BlockKind::BulletItem { .. })),
             }
             KindButton {
-                kind: BlockKind::NumberedItem { indent: 0 }, label: "1.", title: "Numbered list",
+                kind: BlockKind::NumberedItem { indent: 0 }, label: "1.", title: labels.numbered.clone(),
                 active: matches!(current, Some(BlockKind::NumberedItem { .. })),
             }
             KindButton {
-                kind: BlockKind::Quote, label: "❝", title: "Quote",
+                kind: BlockKind::Quote, label: "❝", title: labels.quote.clone(),
                 active: is(&BlockKind::Quote),
             }
         }

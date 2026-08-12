@@ -123,6 +123,6 @@ mod gbnf_match;
 
 pub use backend::{JsonRequest, LlmBackend, StubBackend};
 pub use compile::{Shape, ShapeError};
-pub use settings::{Provider, Settings};
+pub use settings::{Language, Locale, Provider, Settings};
 pub use store::Report;
 pub use template::{NodeKind, Template, TemplateNode};

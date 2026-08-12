@@ -116,7 +116,10 @@ impl DictationControl {
 
         state.set(Dictation::Transcribing);
         let mut notes = self.notes;
-        let language = settings.stt.language();
+        // The app's language unless the user said otherwise — the setting that used to be an
+        // ISO code typed by hand. `None` still means whisper detects it per recording.
+        let language =
+            settings.stt.whisper_language(settings.locale()).map(|code| code.to_string());
 
         spawn(async move {
             match transcribe(model_path, audio, language).await {

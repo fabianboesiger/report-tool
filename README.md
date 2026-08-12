@@ -48,6 +48,42 @@ cargo run -p report-tool --no-default-features
 cargo run -p report-tool
 ```
 
+## Language
+
+German, English, French and Italian. One setting under **Settings**, because it is one
+decision — it sets the interface, the language reports are written in, and what dictation
+expects to hear. It follows the operating system by default and falls back to English for a
+language we do not ship.
+
+Reports used to come out in whatever language the notes happened to be in: the system prompt
+said "write in the same language as the notes" and left it to the model. It now names the
+language outright, so the report language is something you chose rather than something you
+discover. Dictation follows the same setting, with **Detect automatically** still on offer
+for notes that switch language mid-recording.
+
+The interface strings live in `app/assets/i18n/*.ftl` — [Fluent], one file per language,
+compiled into the binary with `include_str!` like every other asset here. `en.ftl` is the
+source of truth and the fallback. Three tests hold the set together: the catalogues must
+define exactly the same keys, every `t!("…")` in the source must exist in `en.ftl`, and every
+screen must draw in all four languages. That last one reads the log rather than expecting a
+panic, because `dioxus-core` catches panics inside a component — see the module docs in
+`app/src/ui.rs`, which explain how the first draft of it passed while checking nothing.
+
+**The German, French and Italian have not been read by native speakers.** They are marked as
+such at the top of each file.
+
+**To test detection by hand**, note that `LANG` does nothing on macOS — `sys-locale` reads
+CoreFoundation there:
+
+```sh
+./report-tool -AppleLanguages "(fr-CH)"   # macOS
+LANG=fr_CH.UTF-8 ./report-tool            # Linux
+```
+
+[Fluent]: https://projectfluent.org
+
+## Backends
+
 Pick a backend under **Settings**:
 
 - **Remote** — any OpenAI-compatible server: `api.openai.com/v1`, `localhost:11434/v1`
@@ -80,8 +116,9 @@ quantized, so the same download size carries noticeably more of the full model's
 quality than a quantization applied afterwards.
 
 **Why turbo, and not `.en`.** Six times faster than large-v3 for a fraction of a
-percent of word error rate, and smaller than `medium`. The multilingual build,
-because these notes are as likely to be German as English.
+percent of word error rate, and smaller than `medium`. The multilingual build, because
+these notes are as likely to be German as English — and because dictation is now *told*
+which of the four to expect rather than detecting it.
 
 ## Storage
 

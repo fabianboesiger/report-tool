@@ -4,6 +4,7 @@
 use dioxus::prelude::*;
 
 use super::icon::{Glyph, Icon};
+use crate::i18n::t;
 
 /// The `.head` band: a title, one line of context, and right-aligned actions.
 ///
@@ -31,8 +32,8 @@ pub fn PageHead(
                     input {
                         class: "head-title",
                         value: "{title}",
-                        placeholder: "Untitled report",
-                        "aria-label": "Report name",
+                        placeholder: t!("workspace-untitled-report"),
+                        "aria-label": t!("workspace-report-name"),
                         oninput: move |event| on_title.call(event.value()),
                     }
                 } else {
@@ -188,7 +189,7 @@ pub fn Row(
     /// A label, and whether it marks the unfinished state — which colours it.
     #[props(default)]
     tag: Option<(String, bool)>,
-    /// Right-aligned, already humanised by `report_core::store::relative_time`.
+    /// Right-aligned, already humanised by `crate::i18n::relative_time`.
     #[props(default)]
     when: String,
     onopen: EventHandler<()>,
@@ -211,7 +212,7 @@ pub fn Row(
                 span { class: "row-acts",
                     super::controls::IconButton {
                         icon: Icon::Trash,
-                        title: "Delete".to_string(),
+                        title: t!("kit-delete"),
                         onclick: move |event: MouseEvent| {
                             // Without this the row's own handler fires too and the
                             // report opens on its way to being deleted.

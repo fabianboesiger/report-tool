@@ -15,6 +15,8 @@ tracing-subscriber = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
 dioxus = { version = "0.7", features = ["desktop", "router"] }
+dioxus-i18n = { workspace = true }
+unic-langid = { workspace = true }
 # Microphone capture. Stays in the GUI process: device access, the OS permission
 # prompt and the level meter all belong where the user is.
 cpal = "0.18"
