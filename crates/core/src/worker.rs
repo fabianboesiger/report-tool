@@ -15,7 +15,10 @@
 //! engines, `nm` shows a single `ggml_metal_device_free`, and a process that loaded
 //! only a *llama* model aborts on exit inside **whisper's** copy of
 //! `ggml-metal-device.m` — one engine's call bound to the other's implementation.
-//! Linux's flat ELF namespace offers even less protection.
+//! Linux's flat ELF namespace offers even less protection — and there the duplicates
+//! are not even silent: `rust-lld` refuses the link outright unless
+//! `--allow-multiple-definition` asks it for Apple's behaviour, which is what the
+//! `build.rs` of this crate and of `app` do.
 //!
 //! Keeping one engine per process sidesteps the question at runtime: a given process
 //! only ever initialises one ggml backend and loads one model, so the two copies are

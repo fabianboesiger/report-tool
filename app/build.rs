@@ -1,6 +1,12 @@
-//! Link-time setup for the `runtime-backends` build.
+//! Link-time setup: duplicated ggml symbols, and rpaths for `runtime-backends`.
 //!
-//! With that feature, ggml is built as **shared** libraries so each GPU backend can
+//! # Duplicate ggml symbols
+//!
+//! See [`allow_duplicate_ggml_symbols`].
+//!
+//! # rpaths
+//!
+//! With `runtime-backends`, ggml is built as **shared** libraries so each GPU backend can
 //! be a separately loadable module (one installer, every GPU — see
 //! `report_core::gpu`). The binary then references `@rpath/libggml-base.0.dylib` and
 //! friends, but nothing adds an `LC_RPATH`, so it dies in the dynamic loader before
@@ -24,12 +30,18 @@ use std::path::{Path, PathBuf};
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_RUNTIME_BACKENDS");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_INFERENCE");
+
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+
+    if std::env::var_os("CARGO_FEATURE_INFERENCE").is_some() {
+        allow_duplicate_ggml_symbols(&target_os);
+    }
 
     if std::env::var_os("CARGO_FEATURE_RUNTIME_BACKENDS").is_none() {
         return;
     }
 
-    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     match target_os.as_str() {
         "macos" => {
             // Next to the binary, and the `Resources/` dir of a bundled .app.
@@ -57,6 +69,34 @@ fn main() {
         for dir in sys_lib_dirs() {
             rpath(&dir.to_string_lossy());
         }
+    }
+}
+
+/// Let the linker keep going when both ggml copies define the same symbol.
+///
+/// `llama-cpp-sys-2` and `whisper-rs-sys` each vendor ggml, and a binary that links
+/// both ends up with two `gguf.cpp.o` in the link — neither archive member can be
+/// left out, because each also carries symbols the other does not have. Apple's ld
+/// resolves this by keeping one definition and saying nothing; Rust's default Linux
+/// linker, `rust-lld`, stops with `duplicate symbol: gguf_type_size` and ~40 more.
+///
+/// `--allow-multiple-definition` asks lld (and GNU ld) for Apple's behaviour: first
+/// definition wins, rest ignored. That is safe *here specifically* because no
+/// process ever runs both engines — the binary re-executes itself as a single-engine
+/// worker, and even the exit path avoids the mismatched static destructors. The full
+/// argument is in the module docs of `report_core::worker`; do not use this as
+/// licence to merge the two workers.
+///
+/// This has to be a link arg from a build script rather than a `rustflags` entry in
+/// `.cargo/config.toml`, because `release.yml` exports its own `RUSTFLAGS` for the
+/// bundle — and an inherited `RUSTFLAGS` replaces the config value rather than
+/// merging with it.
+fn allow_duplicate_ggml_symbols(target_os: &str) {
+    // MSVC has the same hazard and spells the escape hatch `/FORCE:MULTIPLE`, but its
+    // linker picks archive members differently and has not complained, so nothing is
+    // passed there until it does — `/FORCE` also disables incremental linking.
+    if target_os == "linux" {
+        println!("cargo:rustc-link-arg=-Wl,--allow-multiple-definition");
     }
 }
 
