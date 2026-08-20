@@ -75,27 +75,37 @@ fn main() {
 /// Let the linker keep going when both ggml copies define the same symbol.
 ///
 /// `llama-cpp-sys-2` and `whisper-rs-sys` each vendor ggml, and a binary that links
-/// both ends up with two `gguf.cpp.o` in the link — neither archive member can be
-/// left out, because each also carries symbols the other does not have. Apple's ld
-/// resolves this by keeping one definition and saying nothing; Rust's default Linux
-/// linker, `rust-lld`, stops with `duplicate symbol: gguf_type_size` and ~40 more.
+/// both ends up with two copies of the same objects in the link — neither can be
+/// left out, because each carries symbols the other does not have. Apple's ld
+/// resolves that by keeping one definition and saying nothing. The other two
+/// platforms refuse:
 ///
-/// `--allow-multiple-definition` asks lld (and GNU ld) for Apple's behaviour: first
-/// definition wins, rest ignored. That is safe *here specifically* because no
-/// process ever runs both engines — the binary re-executes itself as a single-engine
-/// worker, and even the exit path avoids the mismatched static destructors. The full
-/// argument is in the module docs of `report_core::worker`; do not use this as
-/// licence to merge the two workers.
+/// ```text
+/// rust-lld: error: duplicate symbol: gguf_type_size            (and ~40 more)
+/// ggml.c.obj : error LNK2005: ggml_abort already defined ...   (and ~2000 more)
+/// ```
+///
+/// So both are asked for Apple's behaviour — first definition wins, rest ignored.
+/// That is safe *here specifically* because no process ever runs both engines: the
+/// binary re-executes itself as a single-engine worker, and even the exit path
+/// avoids the mismatched static destructors. The full argument is in the module docs
+/// of `report_core::worker`; do not use this as licence to merge the two workers.
 ///
 /// This has to be a link arg from a build script rather than a `rustflags` entry in
 /// `.cargo/config.toml`, because `release.yml` exports its own `RUSTFLAGS` for the
 /// bundle — and an inherited `RUSTFLAGS` replaces the config value rather than
 /// merging with it.
 fn allow_duplicate_ggml_symbols(target_os: &str) {
-    // MSVC has the same hazard and spells the escape hatch `/FORCE:MULTIPLE`, but its
-    // linker picks archive members differently and has not complained, so nothing is
-    // passed there until it does — `/FORCE` also disables incremental linking.
-    if target_os == "linux" {
+    // Keyed on the *linker*, not the OS, so a windows-gnu build would get the GNU
+    // spelling rather than link.exe's.
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        // `/FORCE:MULTIPLE`, never plain `/FORCE`: unresolved externals must stay
+        // fatal. It demotes LNK2005 to a warning and disables incremental linking,
+        // which a release bundle was not using anyway. link.exe then prints one
+        // LNK4006 per duplicate — thousands of lines, unavoidable short of not
+        // linking both engines into one binary.
+        println!("cargo:rustc-link-arg=/FORCE:MULTIPLE");
+    } else if target_os == "linux" || target_os == "windows" {
         println!("cargo:rustc-link-arg=-Wl,--allow-multiple-definition");
     }
 }
